@@ -1,0 +1,2216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RTP Trainer — Live NLHE Cash</title>
+<style>
+  :root{
+    --felt:#101317;
+    --felt-2:#171b21;
+    --felt-3:#1e242c;
+    --line:#2b333d;
+    --bone:#e6eaee;
+    --bone-dim:#8b97a4;
+    --gold:#6fb3d9;
+    --gold-dim:#3d6a86;
+    --red:#e0645c;
+    --live:#8fd3ff;          /* still in the hand */
+    --gone:#5b6672;          /* out of the hand */
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--felt); color:var(--bone);
+    font-family:var(--mono); font-size:14px; line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1180px;margin:0 auto;padding:20px 18px 80px}
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;
+    border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:18px}
+  h1{font-size:15px;letter-spacing:.14em;text-transform:uppercase;margin:0;font-weight:600}
+  .sub{color:var(--bone-dim);font-size:12px;letter-spacing:.04em}
+  .grid{display:grid;grid-template-columns:290px 1fr;gap:20px;align-items:start}
+  @media(max-width:900px){.grid{grid-template-columns:1fr}}
+  body.playing aside{display:none}
+  body.playing .grid{grid-template-columns:1fr}
+  /* Drill layout: decision + table on the left, hand history on the right. */
+  /* Text-only drill: wide history, table pinned to the right. */
+  body.playing main{
+    display:grid; gap:16px; align-items:start;
+    grid-template-columns:1fr 390px;
+    grid-template-areas:"action action" "tools tools" "replayer replayer" "history table" "share share";
+  }
+  /* Replayer open: details on the left quarter, felt right with the table beneath. */
+  body.playing.rep-open main{
+    grid-template-columns:25% 1fr;
+    grid-template-areas:"action action" "tools tools" "history replayer" "history table" "share share";
+  }
+  body.playing #repSec{grid-area:replayer;margin-bottom:0}
+  body.playing #repTools{grid-area:tools;margin-bottom:0}
+  body.playing main section.panel{margin-bottom:0}
+  body.playing #secAction{grid-area:action}
+  body.playing #secHistory{grid-area:history}
+  body.playing #secTable{grid-area:table}
+  body.playing #secShare{grid-area:share}
+  @media(max-width:900px){ body.playing main{display:block}
+    body.playing main section.panel{margin-bottom:16px} }
+
+  .panel{background:var(--felt-2);border:1px solid var(--line);padding:14px}
+  .panel h2{font-size:11px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--bone-dim);margin:0 0 10px;font-weight:600}
+  .sechead{font-size:15px !important;letter-spacing:.2em !important;text-transform:uppercase;
+    color:var(--gold) !important;font-weight:700 !important;margin:0 0 14px !important;
+    padding-bottom:8px;border-bottom:1px solid var(--gold-dim)}
+  section.panel{margin-bottom:16px}
+
+  /* ---- hand replayer ---- */
+  details.rep{border:1px solid var(--line);background:var(--felt-2);margin-bottom:16px}
+  details.rep > summary{cursor:pointer;list-style:none;padding:12px 14px;
+    font-size:15px;letter-spacing:.2em;text-transform:uppercase;color:var(--gold);font-weight:700}
+  details.rep > summary::-webkit-details-marker{display:none}
+  details.rep > summary::before{content:'\25B8 ';display:inline-block;transition:transform .15s}
+  details.rep[open] > summary::before{transform:rotate(90deg)}
+  .repbody{padding:0 14px 14px}
+  .feltwrap{position:relative;width:100%;padding-top:62%;min-height:520px;max-height:560px}
+  .felt{position:absolute;left:13%;right:13%;top:22%;bottom:22%;border-radius:50% / 50%;
+    background:
+      repeating-linear-gradient(48deg, rgba(255,255,255,.014) 0 2px, transparent 2px 5px),
+      radial-gradient(ellipse at 50% 44%,
+        rgba(111,179,217,.14) 0%, rgba(111,179,217,.075) 46%,
+        rgba(111,179,217,.028) 74%, rgba(111,179,217,.012) 100%),
+      #131a20;
+    border:3px solid rgba(143,211,255,.28);
+    box-shadow:0 0 0 7px rgba(143,211,255,.045), 0 0 22px rgba(111,179,217,.06),
+               inset 0 0 46px rgba(0,0,0,.5)}
+  .feltlogo{position:absolute;left:50%;top:72%;transform:translate(-50%,-50%);
+    font-size:15px;letter-spacing:.36em;text-transform:uppercase;font-weight:600;
+    color:rgba(143,211,255,.15);white-space:nowrap;pointer-events:none;user-select:none}
+  .seat{position:absolute;transform:translate(-50%,-50%);width:126px;text-align:center;
+    font-size:11px;line-height:1.3;padding:6px 5px 7px;border:2px solid var(--line);
+    border-radius:7px;background:#151b21;box-shadow:0 2px 9px rgba(0,0,0,.5)}
+  .seat.acting{box-shadow:0 0 0 3px var(--live), 0 2px 12px rgba(0,0,0,.6)}
+  .seat .nm{font-weight:800;letter-spacing:.06em}
+  .seat .fl{font-size:10px}
+  .seat .st{font-variant-numeric:tabular-nums;font-size:12px}
+  .seat.live .st,.seat.live .fl,
+  .seat.hero .st,.seat.hero .fl{color:var(--live)}
+  .seat.live .nm,.seat.hero .nm{font-weight:800}
+  .seat.hero{border-width:4px}
+  .seat.folded .nm,.seat.folded .ty,.seat.folded .st,.seat.folded .fl{color:var(--gone);font-weight:400}
+  .seat.folded{background:#11161a;box-shadow:none;border-color:var(--gone)}
+  .seat .bet{display:inline-block;margin-top:3px;padding:1px 7px;border-radius:9px;
+    background:var(--gold);color:#08131b;font-weight:700;font-size:11px;font-variant-numeric:tabular-nums}
+  .bubble{position:absolute;white-space:nowrap;font-size:11px;font-weight:600;
+    background:rgba(9,14,18,.9);border:1px solid rgba(143,211,255,.28);border-radius:13px;
+    padding:3px 9px;display:flex;align-items:center;gap:5px;box-shadow:0 2px 6px rgba(0,0,0,.55)}
+  .bubble{transform:translate(-50%,-50%)}
+  .seat.folded .bubble{color:var(--gone);border-color:rgba(91,102,114,.4);background:rgba(9,12,15,.85)}
+  .chips{display:inline-flex}
+  .chips i{width:13px;height:13px;border-radius:50%;display:block;margin-left:-5px;
+    border:2px dotted rgba(255,255,255,.6);box-shadow:0 1px 2px rgba(0,0,0,.6)}
+  .chips i:first-child{margin-left:0}
+  .chips i.c1{background:#c9483f}
+  .chips i.c2{background:#2f9e57}
+  .chips i.c3{background:#23292f;border-color:rgba(255,255,255,.75)}
+  .mini{display:flex;gap:3px;justify-content:center;margin-top:3px}
+  .mini{gap:3px}
+  .mini i{width:19px;height:27px;border-radius:3px;display:block;
+    background:linear-gradient(140deg,#2c3d4a,#1d2932);border:1px solid #4a5f70}
+  .ct{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;
+    width:var(--cw);height:calc(var(--cw)*1.42);background:#f4f2ec;color:#11161b;
+    border-radius:calc(var(--cw)*0.13);font-weight:800;line-height:1;
+    font-size:calc(var(--cw)*0.55);margin:0 2px;box-shadow:0 1px 4px rgba(0,0,0,.5)}
+  .ct i{font-style:normal;font-size:calc(var(--cw)*0.5);margin-top:2px}
+  .ct.r{color:#c62f28}
+  .cardwrap{display:inline-flex;margin-top:4px}
+  .btnchip{position:absolute;width:20px;height:20px;border-radius:50%;background:var(--bone);
+    color:#0d1216;font-size:10px;font-weight:800;text-align:center;line-height:20px;
+    transform:translate(-50%,-50%);border:1px solid #7d8894}
+  .center{position:absolute;left:50%;top:46%;transform:translate(-50%,-50%);text-align:center;
+    width:auto;max-width:34%;white-space:nowrap;pointer-events:none}
+  .center .board{font-size:29px;letter-spacing:.06em;line-height:1.2}
+  .center .potl{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--bone-dim);margin-top:4px}
+  .center .potv{font-size:19px;font-variant-numeric:tabular-nums}
+  .pbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px;
+    border-top:1px solid var(--line);padding-top:10px}
+  .pbar .pos{font-size:11px;color:var(--bone-dim);font-variant-numeric:tabular-nums;min-width:96px}
+  .pbar button{padding:5px 10px;font-size:13px}
+  .pbar select{width:auto}
+  .repact{margin-top:12px;border-top:1px solid var(--line);padding-top:12px}
+  section.panel.thin{padding:0;border:none;background:transparent}
+  .thinrow{display:flex;gap:14px;align-items:stretch;flex-wrap:wrap}
+  .tbox{border:1px solid var(--line);background:var(--felt-2);padding:7px 11px;border-radius:3px}
+  .tbox.grow{flex:1;min-width:360px}
+  .boxlbl{font-size:9px;letter-spacing:.2em;text-transform:uppercase;
+    color:var(--bone-dim);font-weight:600;margin-bottom:5px}
+  body.playing .clock{margin-bottom:0;padding:0;border:none;background:transparent;flex:0 0 auto}
+  body.playing .clock .t{font-size:26px;min-width:66px}
+  body.playing .clock .bar{width:120px}
+  body.playing .clock .lbl{display:none}
+  body.playing #act{display:flex;gap:10px;align-items:center;flex-wrap:wrap;flex:1;
+    border:none;background:transparent;padding:0}
+  body.playing #act .opts{margin:0}
+  body.playing #act .sizer{width:auto;flex:1;min-width:240px}
+  body.playing #act .hint{margin:0;font-size:10px}
+  body.playing #act .keys{display:none}
+  body.playing #act .err{margin:0}
+
+  .street-blk{border-top:1px solid var(--line);padding-top:10px;margin-top:12px;
+    padding-left:10px;border-left:2px solid transparent}
+  .street-blk.past .street-acts div{color:#7d8894}
+  .street-blk.cur{border-left-color:var(--gold-dim)}
+  .street-blk.cur .nm{color:var(--gold)}
+  .street-blk:first-child{border-top:none;padding-top:0;margin-top:0}
+  .street-hd{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+  .street-hd .nm{font-size:12px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--bone-dim);font-weight:700;min-width:74px}
+  .street-hd .street-cards{display:inline-flex;align-items:center}
+  .street-hd .street-tags{font-size:11px;color:var(--bone-dim)}
+  .street-acts div{padding:1px 0;font-size:12.5px}
+  .street-acts .hero{color:var(--gold)}
+  .street-acts .sys{color:var(--bone-dim);font-style:italic}
+  .fset{margin-bottom:12px}
+  .fset label{display:block;font-size:11px;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--bone-dim);margin-bottom:4px}
+  select,input[type=text]{
+    width:100%;background:var(--felt-3);color:var(--bone);border:1px solid var(--line);
+    padding:6px 8px;font-family:var(--mono);font-size:13px;border-radius:2px}
+  select:focus,input:focus{outline:2px solid var(--gold-dim);outline-offset:0}
+  .chk{display:flex;gap:6px;align-items:center;margin:2px 0;font-size:12px}
+  details.grp{border-top:1px solid var(--line);margin-bottom:2px}
+  details.grp > summary{cursor:pointer;list-style:none;padding:9px 0 7px;
+    font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--bone-dim);font-weight:600}
+  details.grp > summary::-webkit-details-marker{display:none}
+  details.grp > summary::before{content:'+ ';color:var(--gold-dim)}
+  details.grp[open] > summary::before{content:'– ';color:var(--gold)}
+  details.grp[open] > summary{color:var(--bone)}
+  details.grp > div{padding-bottom:6px}
+  .prow{display:flex;gap:6px;margin-top:6px}
+  .prow input{flex:1}
+  .prow button{padding:6px 9px;font-size:12px}
+  .chk input{accent-color:var(--gold)}
+
+  button{
+    font-family:var(--mono);font-size:13px;letter-spacing:.06em;cursor:pointer;
+    background:var(--felt-3);color:var(--bone);border:1px solid var(--line);
+    padding:8px 12px;border-radius:2px}
+  button:hover{border-color:var(--gold-dim);color:var(--gold)}
+  button:focus-visible{outline:2px solid var(--gold);outline-offset:1px}
+  button.primary{background:var(--gold);color:#08131b;border-color:var(--gold);font-weight:600}
+  button.primary:hover{background:#8cc4e3;color:#08131b}
+  button:disabled{opacity:.35;cursor:not-allowed}
+
+  /* clock — the signature element */
+  .clock{
+    display:flex;align-items:center;gap:14px;
+    border:1px solid var(--line);background:var(--felt-2);
+    padding:10px 14px;margin-bottom:14px}
+  .clock .t{font-size:38px;line-height:1;font-variant-numeric:tabular-nums;
+    letter-spacing:-.02em;color:var(--gold);min-width:96px}
+  .clock .bar{flex:1;height:3px;background:var(--felt-3);position:relative;overflow:hidden}
+  .clock .bar i{position:absolute;inset:0 auto 0 0;background:var(--gold);width:100%}
+  .clock.expired .t{color:var(--red)}
+  .clock.expired .bar i{background:var(--red)}
+  .clock.expired{border-color:var(--red);animation:pulse .9s ease-in-out 3}
+  button.flagged{background:var(--gold);color:#08131b;border-color:var(--gold)}
+  @keyframes pulse{50%{background:#2a1a1c}}
+  @media (prefers-reduced-motion:reduce){.clock.expired{animation:none}}
+  .clock .lbl{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--bone-dim)}
+
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;align-items:start}
+  @media(max-width:760px){.split{grid-template-columns:1fr}}
+  .board{border:1px solid var(--line);background:var(--felt-2);padding:14px}
+  .row{display:flex;gap:26px;flex-wrap:wrap;margin-bottom:10px}
+  .kv{font-size:12px}
+  .kv b{display:block;font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--bone-dim);font-weight:600}
+  .kv span{font-size:13px}
+  .kv.big span{font-size:30px;line-height:1.1;font-variant-numeric:tabular-nums}
+  .kv.mid span{font-size:20px;font-variant-numeric:tabular-nums}
+  .row.top{align-items:baseline;gap:30px}
+
+  .cards{margin:6px 0 2px;display:flex;gap:2px}
+  .cs{color:#f2f5f8}.ch{color:#e0645c}
+  .muted{color:var(--bone-dim)}
+
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th{text-align:left;font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--bone-dim);font-weight:600;padding:4px 8px 4px 0;border-bottom:1px solid var(--line)}
+  td{padding:3px 8px 3px 0;border-bottom:1px solid #232a33;font-variant-numeric:tabular-nums}
+  tr.hero td{color:var(--gold)}
+  tr.out td{color:#5b6672}
+
+  .log{background:var(--felt-2);border:1px solid var(--line);padding:12px;
+    max-height:300px;overflow:auto;font-size:12.5px;margin-bottom:14px}
+  .log div{padding:1px 0}
+  .log .street{color:var(--gold);letter-spacing:.14em;text-transform:uppercase;
+    font-size:10px;margin-top:8px;border-top:1px solid var(--line);padding-top:6px}
+  .log .hero{color:var(--gold)}
+  .log .sys{color:var(--bone-dim);font-style:italic}
+
+  .act{border:1px solid var(--line);background:var(--felt-2);padding:14px}
+  .act .opts{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center}
+  .opts button{border:none;font-weight:700;letter-spacing:.05em}
+  .opts button.bt-fold, .opts button.bt-fold:hover{background:#d94a44;color:#fff8f7;border-color:transparent}
+  .opts button.bt-check,.opts button.bt-check:hover{background:#6b7683;color:#0d1216;border-color:transparent}
+  .opts button.bt-call, .opts button.bt-call:hover{background:#4a9fd4;color:#04131d;border-color:transparent}
+  .opts button.bt-bet,  .opts button.bt-bet:hover{background:#16a34a;color:#eafff1;border-color:transparent}
+  .opts button.bt-raise,.opts button.bt-raise:hover{background:#4ade80;color:#04160b;border-color:transparent}
+  .opts button.bt-pink, .opts button.bt-pink:hover{background:transparent;color:#ff4fd8;
+    border:2px solid #ff4fd8;font-weight:700}
+  .opts button.bt-pink:hover{background:rgba(255,79,216,.12)}
+  .opts button:hover{filter:brightness(1.13)}
+  .opts .sizer{display:none;gap:8px;align-items:center;flex:1;min-width:230px}
+  .act .sizer{display:flex;gap:8px;align-items:center}
+  .act .sizer input{flex:1}
+  .hint{font-size:11px;color:var(--bone-dim);margin-top:6px}
+  .err{color:var(--red);font-size:12px;margin-top:6px;min-height:16px}
+  .done{color:var(--bone-dim);text-align:center;padding:8px}
+  .tags{font-size:11px;color:var(--bone-dim);letter-spacing:.04em}
+  .note{font-size:11px;color:var(--bone-dim);border-top:1px solid var(--line);
+    margin-top:14px;padding-top:10px}
+  textarea{width:100%;height:120px;background:var(--felt-3);color:var(--bone);
+    border:1px solid var(--line);font-family:var(--mono);font-size:11.5px;padding:8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>RTP Trainer</h1>
+  <span class="sub">8-handed live NLHE cash · verbalize · timer · Loom</span>
+</header>
+
+<div class="grid">
+  <!-- ============ FILTERS ============ -->
+  <aside class="panel">
+    <h2 class="sechead">Filters</h2>
+    <button class="primary" id="deal" style="width:100%;margin-bottom:14px">Deal new hand</button>
+
+    <div class="fset"><label>Preset</label>
+      <select id="presetSel"><option value="">— none —</option></select>
+      <div class="prow">
+        <input type="text" id="presetName" placeholder="save current as…" autocomplete="off">
+        <button id="presetSave">Save</button>
+        <button id="presetDel">Del</button>
+      </div>
+    </div>
+
+    <details class="grp" open><summary>Scenario</summary><div>
+      <div class="fset"><label>Stakes</label>
+        <select id="fStakes"><option value="">Any (weighted)</option></select></div>
+      <div class="fset"><label>Target pot type</label>
+        <select id="fPot">
+          <option value="">Any (weighted)</option>
+          <option value="Limped">Limped</option><option value="SRP">SRP</option>
+          <option value="3BP">3BP</option><option value="4BP">4BP</option>
+        </select></div>
+      <div class="fset"><label>Our seat</label>
+        <select id="fSeat"><option value="">Any</option></select></div>
+      <div class="fset"><label>Target ways to flop</label>
+        <select id="fWays"><option value="">Any (weighted)</option>
+          <option value="2">Heads up</option><option value="3">3-way</option><option value="4">4-way</option>
+        </select></div>
+    </div></details>
+
+    <details class="grp"><summary>Board</summary><div>
+      <div class="fset"><label>Fixed flop (optional)</label>
+        <input type="text" id="fFixedFlop" placeholder="e.g. As5s3h — blank = random" autocomplete="off"></div>
+      <div class="fset">
+        <div class="chk"><input type="checkbox" id="fHideTags"><label for="fHideTags"
+          style="margin:0;text-transform:none;letter-spacing:0;font-size:12px">Hide board texture tags</label></div>
+      </div>
+      <div class="fset"><label>Flop texture</label>
+        <select id="fFlop"><option value="">Any</option>
+          <option>paired</option><option>monotone</option><option>two-tone</option><option>rainbow</option>
+          <option>connected</option><option>broadway-heavy</option><option>ace-high</option><option>low</option>
+        </select></div>
+      <div class="fset"><label>Turn card type</label>
+        <select id="fTurn"><option value="">Any</option>
+          <option>blank</option><option>overcard</option><option>pairs board</option>
+          <option>completes flush</option><option>completes straight</option><option>brings backdoor FD</option>
+        </select></div>
+      <div class="fset"><label>River card type</label>
+        <select id="fRiver"><option value="">Any</option>
+          <option>blank</option><option>overcard</option><option>pairs board</option>
+          <option>completes flush</option><option>completes straight</option>
+        </select></div>
+    </div></details>
+
+    <details class="grp"><summary>Line</summary><div>
+      <div class="fset"><label>Drill starts on</label>
+        <select id="fDrillAt">
+          <option value="preflop" selected>Preflop (play the whole hand)</option>
+          <option value="flop">Flop</option>
+          <option value="turn">Turn</option>
+          <option value="river">River</option>
+        </select></div>
+      <div class="fset"><label>Flop line (if drilling later)</label>
+        <select id="fLineFlop"><option value="">Any</option>
+          <option value="bet-call">We cbet, villain calls</option>
+          <option value="bet-raise">We cbet, villain raises (we call)</option>
+          <option value="check-lead">We check, villain bets (we call)</option>
+          <option value="check-check">We check, villain checks</option>
+        </select></div>
+      <div class="fset"><label>Turn line (if drilling river)</label>
+        <select id="fLineTurn"><option value="">Any</option>
+          <option value="bet-call">We bet, villain calls</option>
+          <option value="bet-raise">We bet, villain raises (we call)</option>
+          <option value="check-lead">We check, villain bets (we call)</option>
+          <option value="check-check">We check, villain checks</option>
+        </select></div>
+    </div></details>
+
+    <details class="grp" open><summary>Settings</summary><div>
+      <div class="fset"><label>Timer per decision</label>
+        <select id="fTimer">
+          <option>2</option><option>5</option><option>10</option><option selected>15</option>
+          <option>20</option><option>25</option><option>30</option><option>45</option>
+          <option>60</option><option>90</option><option>120</option>
+        </select></div>
+      <div class="fset">
+        <div class="chk"><input type="checkbox" id="fPacing" checked><label for="fPacing"
+          style="margin:0;text-transform:none;letter-spacing:0;font-size:12px">Realistic action timing (delays)</label></div>
+      </div>
+      <div class="fset">
+        <div class="chk"><input type="checkbox" id="fReplayer" checked><label for="fReplayer"
+          style="margin:0;text-transform:none;letter-spacing:0;font-size:12px">Open hand replayer on deal</label></div>
+      </div>
+      <div class="fset"><label>Villain calling model</label>
+        <select id="fModel">
+          <option value="volume" selected>High volume (sticky flop/turn)</option>
+          <option value="real">Population-realistic</option>
+        </select></div>
+    </div></details>
+
+    <div class="note">
+      Preflop ranges are approximations. Edit <code>RANGES</code> in the source
+      to drop in your own charts.
+    </div>
+  </aside>
+
+  <!-- ============ TABLE ============ -->
+  <main>
+    <section class="panel" id="repTools" style="display:none">
+      <h2 class="sechead" style="font-size:13px">Replay &amp; Ladder</h2>
+      <div id="toolsBody"></div>
+    </section>
+
+    <details class="rep" id="repSec" open>
+      <summary>Hand Replayer</summary>
+      <div class="repbody">
+        <div class="feltwrap" id="felt"></div>
+        <div class="pbar">
+          <button id="pbFirst" title="Back to the start">|&lt;</button>
+          <button id="pbPrev" title="Step back">&lt;</button>
+          <button id="pbPlay" title="Play / pause">&#9654;</button>
+          <button id="pbNext" title="Step forward">&gt;</button>
+          <button id="pbLive" title="Jump to the current state">Live</button>
+          <span class="pos" id="pbPos">—</span>
+          <select id="pbSpeed">
+            <option value="1400">Slow</option>
+            <option value="850" selected>Normal</option>
+            <option value="400">Fast</option>
+          </select>
+        </div>
+      </div>
+    </details>
+
+    <section class="panel thin" id="secAction">
+      <div class="thinrow">
+      <div class="tbox"><div class="boxlbl">Timer</div>
+      <div class="clock" id="clock">
+        <div class="t" id="clockT">--</div>
+        <div style="flex:1">
+          <div class="lbl" id="clockL">no active decision</div>
+          <div class="bar"><i id="clockBar"></i></div>
+        </div>
+        <button id="clockRestart" title="Restart this decision's clock">Reset clock</button>
+        <button id="dealTop" title="Abandon this hand and deal a new one">New hand</button>
+        <button id="flagBtn" title="Mark this rep to review later">Flag</button>
+      </div>
+      </div>
+      <div class="tbox grow"><div class="boxlbl" id="actLbl">Our action</div>
+        <div class="act" id="act">
+          <div class="done">No hand in play.</div>
+        </div>
+      </div>
+      </div>
+    </section>
+
+    <section class="panel" id="secHistory">
+      <h2 class="sechead">Hand History Details</h2>
+      <div class="row top">
+        <div class="kv"><b>Stakes</b><span id="oStakes">—</span></div>
+        <div class="kv"><b>Our seat</b><span id="oSeat">—</span></div>
+        <div class="kv"><b>Our stack</b><span id="oStack">—</span></div>
+      </div>
+      <div class="kv" style="margin-bottom:14px"><b>Our hand</b>
+        <div class="cards" id="oHand">—</div></div>
+      <div id="streets"><div class="muted">Press "Deal new hand" to start a rep.</div></div>
+    </section>
+
+    <section class="panel" id="secTable">
+      <h2 class="sechead">Table Breakdown</h2>
+      <table id="tbl"><thead><tr>
+        <th>Seat</th><th>Player type</th><th>Read</th><th>Stack</th><th>Eff. vs us</th><th>In pot</th><th>Status</th>
+      </tr></thead><tbody></tbody></table>
+    </section>
+
+    <section class="panel" id="secShare">
+      <h2 class="sechead">Share: Hand Summary</h2>
+      <textarea id="summary" readonly placeholder="Populated as the hand plays out."></textarea>
+      <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+        <button id="copySum">Copy summary</button>
+        <button id="copySession">Copy full session log</button>
+      </div>
+      <div style="margin-top:14px">
+        <div style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--bone-dim);margin-bottom:6px">Hand shorthand</div>
+        <textarea id="shorthand" readonly style="height:92px"></textarea>
+        <div style="margin-top:8px"><button id="copyShort">Copy shorthand</button></div>
+      </div>
+    </section>
+  </main>
+</div>
+</div>
+
+<script>
+/* ==========================================================================
+   RTP TRAINER — v1 (text only)
+   Layout: ENGINE (pure) -> CONTROLLER (state machine) -> RENDER (DOM)
+   The engine never touches the DOM, so a visual table swaps in at RENDER.
+   ========================================================================== */
+
+/* ------------------------------ CONFIG ---------------------------------- */
+
+const RANKS = ['2','3','4','5','6','7','8','9','T','J','Q','K','A'];
+const RVAL = Object.fromEntries(RANKS.map((r,i)=>[r,i+2]));
+const SUITS = ['s','h','d','c'];
+
+const STAKES = [
+  {id:'2/5',          w:20,  sb:2, bb:5,  straddles:[]        },
+  {id:'2/5/10',       w:45,  sb:2, bb:5,  straddles:[10]      },
+  {id:'2/5/10/20',    w:7.5, sb:2, bb:5,  straddles:[10,20]   },
+  {id:'5/10',         w:20,  sb:5, bb:10, straddles:[]        },
+  {id:'5/10/20',      w:5,   sb:5, bb:10, straddles:[20]      },
+  {id:'5/10/20/40',   w:2.5, sb:5, bb:10, straddles:[20,40]   },
+];
+
+// Seat order clockwise from SB. Postflop action runs in this order.
+const SEATS = ['SB','BB','UTG','UTG1','LJ','HJ','CO','BTN'];
+const SEAT_LABEL = {SB:'SB',BB:'BB',UTG:'UTG',UTG1:'UTG+1',LJ:'LJ',HJ:'HJ',CO:'CO',BTN:'BTN'};
+
+const TYPES = [
+  {n:'Standard Fish',        g:'fish',  w:55/3},
+  {n:'Looser Fish',          g:'fish',  w:55/3},
+  {n:'Tighter Fish',         g:'fish',  w:55/3},
+  {n:'Trying Rec',           g:'rec',   w:25/3},
+  {n:'Aggro Trying Rec',     g:'rec',   w:25/3},
+  {n:'Tighter Trying Rec',   g:'rec',   w:25/3},
+  {n:'Reg',                  g:'reg',   w:15/3},
+  {n:'Tighter Reg',          g:'reg',   w:15/3},
+  {n:'Aggro Reg',            g:'reg',   w:15/3},
+  {n:'Whale',                g:'whale', w:5    },
+];
+
+// Stack depth in big blinds (the largest forced bet), mean/sd, clamped.
+const STACKS = {
+  'Standard Fish':      {m:190,s:55,lo:70,hi:340},
+  'Looser Fish':        {m:205,s:60,lo:70,hi:360},
+  'Tighter Fish':       {m:150,s:45,lo:60,hi:280},
+  'Trying Rec':         {m:190,s:50,lo:75,hi:320},
+  'Aggro Trying Rec':   {m:210,s:55,lo:80,hi:340},
+  'Tighter Trying Rec': {m:150,s:40,lo:60,hi:270},
+  'Reg':                {m:200,s:50,lo:90,hi:330},
+  'Tighter Reg':        {m:160,s:40,lo:70,hi:280},
+  'Aggro Reg':          {m:220,s:55,lo:90,hi:350},
+  'Whale':              {m:245,s:95,lo:50,hi:400},
+};
+
+// Preflop behaviour by type. Each node sums to 1.
+const PF = {
+  'Standard Fish':      {open:{limp:.30,raise:.09,fold:.61}, vsLimp:{limp:.36,raise:.07,fold:.57}, vsRaise:{call:.44,r3:.04,fold:.52}, vs3B:{call:.46,r4:.05,fold:.49}, vs4B:{call:.34,r5:.05,fold:.61}},
+  'Looser Fish':        {open:{limp:.42,raise:.10,fold:.48}, vsLimp:{limp:.48,raise:.08,fold:.44}, vsRaise:{call:.55,r3:.05,fold:.40}, vs3B:{call:.55,r4:.05,fold:.40}, vs4B:{call:.42,r5:.05,fold:.53}},
+  'Tighter Fish':       {open:{limp:.18,raise:.08,fold:.74}, vsLimp:{limp:.22,raise:.06,fold:.72}, vsRaise:{call:.30,r3:.04,fold:.66}, vs3B:{call:.32,r4:.05,fold:.63}, vs4B:{call:.24,r5:.05,fold:.71}},
+  'Trying Rec':         {open:{limp:.14,raise:.17,fold:.69}, vsLimp:{limp:.16,raise:.15,fold:.69}, vsRaise:{call:.33,r3:.08,fold:.59}, vs3B:{call:.32,r4:.07,fold:.61}, vs4B:{call:.22,r5:.06,fold:.72}},
+  'Aggro Trying Rec':   {open:{limp:.10,raise:.25,fold:.65}, vsLimp:{limp:.10,raise:.24,fold:.66}, vsRaise:{call:.30,r3:.14,fold:.56}, vs3B:{call:.28,r4:.11,fold:.61}, vs4B:{call:.20,r5:.09,fold:.71}},
+  'Tighter Trying Rec': {open:{limp:.08,raise:.13,fold:.79}, vsLimp:{limp:.10,raise:.12,fold:.78}, vsRaise:{call:.24,r3:.07,fold:.69}, vs3B:{call:.22,r4:.06,fold:.72}, vs4B:{call:.16,r5:.05,fold:.79}},
+  'Reg':                {open:{limp:.02,raise:.24,fold:.74}, vsLimp:{limp:.03,raise:.22,fold:.75}, vsRaise:{call:.22,r3:.12,fold:.66}, vs3B:{call:.20,r4:.10,fold:.70}, vs4B:{call:.14,r5:.07,fold:.79}},
+  'Tighter Reg':        {open:{limp:.01,raise:.18,fold:.81}, vsLimp:{limp:.02,raise:.17,fold:.81}, vsRaise:{call:.17,r3:.10,fold:.73}, vs3B:{call:.15,r4:.08,fold:.77}, vs4B:{call:.11,r5:.06,fold:.83}},
+  'Aggro Reg':          {open:{limp:.01,raise:.32,fold:.67}, vsLimp:{limp:.02,raise:.30,fold:.68}, vsRaise:{call:.22,r3:.19,fold:.59}, vs3B:{call:.19,r4:.14,fold:.67}, vs4B:{call:.13,r5:.10,fold:.77}},
+  'Whale':              {open:{limp:.50,raise:.14,fold:.36}, vsLimp:{limp:.54,raise:.12,fold:.34}, vsRaise:{call:.66,r3:.06,fold:.28}, vs3B:{call:.62,r4:.06,fold:.32}, vs4B:{call:.50,r5:.06,fold:.44}},
+};
+
+// Postflop. `fold` here is the RIVER base fold vs a pot-sized bet; flop/turn use
+// the volume model (sticky) or scale off this in realistic mode.
+const POST = {
+  'Standard Fish':      {rFold:.30, bet:.28, raise:.09},
+  'Looser Fish':        {rFold:.24, bet:.30, raise:.10},
+  'Tighter Fish':       {rFold:.42, bet:.22, raise:.07},
+  'Trying Rec':         {rFold:.40, bet:.33, raise:.10},
+  'Aggro Trying Rec':   {rFold:.34, bet:.45, raise:.16},
+  'Tighter Trying Rec': {rFold:.50, bet:.26, raise:.08},
+  'Reg':                {rFold:.48, bet:.42, raise:.14},
+  'Tighter Reg':        {rFold:.56, bet:.34, raise:.10},
+  'Aggro Reg':          {rFold:.44, bet:.52, raise:.20},
+  'Whale':              {rFold:.16, bet:.30, raise:.09},
+};
+
+const POT_TYPE_W = {Limped:5, SRP:50, '3BP':30, '4BP':15};
+const WAYS_W = {2:60, 3:35, 4:5};
+
+/* ---- 184-flop subset (canonical; suits are randomized per deal) ---- */
+const FLOPS = ['As5s3h','8s7h7d','Ah9s5s','7h4s2s','KsTh7d','Kh6s2s','7s3h2s','Ks6h4d','KsJh4d','8s5s3h','6s6h3s','AsQhTd','8s7s3h','Ks9h2s','AsQh9d','KsJs2h','KhTs8s','AsKh2d','Qs8h6d','Js7h5d','5s4h3s','Qs4h3d','5s4h2d','Qs6s4s','QhQd3s','9s3h2d','As9h6s','9s8h4d','AsJh6d','8s6h3s','Qs8h2d','Qs3h2d','JhTs2s','8s7h4d','Ah7s6s','AsKsKh','Js9h3d','Kh8s4s','Kh9s8s','Js8s8h','Ts6h6d','As8s6s','Ts9h6s','AsTh2s','AhKs3s','QsQh8s','Jh9s4s','QsTh2s','Qs7h4d','9h7s5s','Th9s7s','Ks4s2h','Ks7s2s','Js4h4d','9s4h3d','AhQs9s','AhAd4s','Ah7s5s','QhQdJs','As9s4h','As9h8d','Th4s3s','6h5s4s','8s6s5s','KsTh2d','JsJh4s','Ts9s8h','9h3s2s','Qh7s6s','QsJs7h','5s4s4h','KsQs3s','8s7s6h','Ks9h4d','Qs9s3s','Qs8h4s','7s6h5s','QsTs9h','AhJs2s','As9s3h','Ts2s2h','Ts8h8d','Js9h6d','AsQs7s','KsQh5d','9h5s2s','Ks6h3d','ThTd7s','Th8s2s','Js8h3s','QsThTd','AsQs5h','JhTs6s','Js9s7h','AsKh7d','KsQh3d','Ts6h5d','8s3h2d','As6h6d','7s3s2h','8s5h2s','Js7h2s','Ks7h5d','Qs4h2d','KsJh5d','8s7h5d','9s5h2s','Js5s5h','Ts7s5h','6s5s5h','9s6h4s','AsKsQh','Js8h4d','Ts7s7h','6s5s2h','KsJhJd','AsTh7d','6s4s3h','JsTh5s','Qs8s2h','AsAh4s','Ks7h3d','Js9h4s','AsKs6h','Th6s2s','Js8h5d','As8s6h','KhKd4s','KsTh4d','AhAd6s','Js9h2d','As4s2s','Qs5h2s','8h6s3s','Ks8h7d','8s6h5s','5s3h3d','Ks8s5s','Ks7h6d','KsTs3h','JhJd5s','AsJhTs','Qs5h4d','KhTs9s','As8h8d','As5s4h','JsTs3h','AsKh4d','Ah9s2s','KsTs6s','KsKh4s','AsJh3d','AsJh8s','Js4s2h','AsQhQd','6s4h2d','QhJs6s','9s6h3s','KsJsTh','QsJh3s','ThTd6s','Th6s3s','As6s5h','9h9d7s','QhJsTs','Qs4h4d','9s8h3d','QsTsTh','9s2h2d','7s6h3d','Ts5h4d','Ts7s3h','AsAhTs','7s4s3h','Ts5s3s','Qs8h5s','As8h5d','KhJs5s','Kh9s7s','KsQsTh','Qh8s7s','JsTh8s','Ks9s2h','AhJs3s'];
+
+/* ---- Hero ranges. Approximations — swap in your own charts. ---- */
+const RANGES = {
+  // Open-raising first in
+  'RFI_UTG':  '22+, ATs+, KTs+, QTs+, JTs, T9s, 98s, 87s, AQo+, KQo',
+  'RFI_UTG1': '22+, A8s+, KTs+, QTs+, JTs, T9s, 98s, 87s, AJo+, KQo',
+  'RFI_LJ':   '22+, A8s+, K9s+, Q9s+, J9s+, T8s+, 98s, 87s, ATo+, KJo+',
+  'RFI_HJ':   '22+, A8s+, A5s-A2s, K9s+, Q9s+, J9s+, T8s+, 98s, 87s, 76s, 65s, 54s, ATo+, KJo+, QJo',
+  'RFI_CO':   '22+, A2s+, K5s+, Q8s+, J8s+, T7s+, 97s+, 86s+, 75s+, 65s, 54s, A9o+, KTo+, QTo+, JTo',
+  'RFI_BTN':  '22+, A2s+, K2s+, Q2s+, J5s+, T6s+, 96s+, 85s+, 74s+, 63s+, 52s+, 43s, A2o+, K8o+, Q9o+, J9o+, T9o',
+  'RFI_SB':   '22+, A2s+, K5s+, Q7s+, J7s+, T7s+, 96s+, 86s+, 75s+, 64s+, 54s, A7o+, K9o+, QTo+, JTo',
+  // Isolating limpers
+  'ISO_EARLY':'55+, A9s+, A5s-A3s, KTs+, QTs+, JTs, T9s, AJo+, KQo',
+  'ISO_LATE': '33+, A2s+, K8s+, Q9s+, J9s+, T8s+, 98s, 87s, 76s, ATo+, KJo+, QJo',
+  'ISO_SB':   '22+, A2s+, K5s+, Q7s+, J8s+, T8s+, 97s+, 86s+, 75s+, 65s, 54s, A5o+, K9o+, Q9o+, J9o+, T9o',
+  'ISO_BB':   '22+, A2s+, K2s+, Q4s+, J6s+, T6s+, 95s+, 85s+, 74s+, 64s+, 53s+, A2o+, K7o+, Q8o+, J8o+, T8o+, 98o',
+  // Facing a single open (3bet / call / fold decision)
+  'VS_OPEN_TIGHT':  '77+, ATs+, KJs+, QJs, JTs, T9s, 87s, 76s, 65s, AQo+',
+  'VS_OPEN_MED':    '55+, A8s+, A5s-A2s, KTs+, QTs+, JTs, T9s, 98s, 87s, 76s, 65s, 54s, AJo+, KQo',
+  'VS_OPEN_LOOSE':  '22+, A2s+, K8s+, Q9s+, J9s+, T8s+, 97s+, 86s+, 75s+, 65s, 54s, ATo+, KJo+, QJo',
+  // Squeezing (open + at least one cold-caller)
+  'SQZ_IP':   '77+, ATs+, KJs+, QJs, JTs, AQo+',
+  'SQZ_OOP':  '99+, AJs+, KQs, AKo',
+  // We opened, facing a 3bet
+  'VS_3B_IP':  '22+, A5s-A2s, ATs+, KTs+, QTs+, JTs, T9s, 98s, 87s, 76s, 65s, 54s, AQo+',
+  'VS_3B_OOP': '55+, A5s-A2s, AJs+, KQs, QJs, JTs, T9s, 87s, 76s, AKo',
+  // Cold 4bet (someone opened, someone else 3bet, we have not acted)
+  'COLD_4B':   'QQ+, AKs, AKo, A5s',
+  // We 3bet, facing a 4bet
+  'VS_4B':     'TT+, AQs+, AKo, 87s, 76s, 65s, 55, 44, 33',
+  // Facing a 5bet jam
+  'VS_5B':     'KK+',
+};
+
+/* ------------------------------ HELPERS --------------------------------- */
+
+const rnd = () => Math.random();
+const ri  = n => Math.floor(Math.random()*n);
+function pickW(items, wf){
+  const tot = items.reduce((a,x)=>a+wf(x),0);
+  let r = rnd()*tot;
+  for(const x of items){ r -= wf(x); if(r<=0) return x; }
+  return items[items.length-1];
+}
+function pickObjW(obj){
+  const keys = Object.keys(obj), tot = keys.reduce((a,k)=>a+obj[k],0);
+  let r = rnd()*tot;
+  for(const k of keys){ r -= obj[k]; if(r<=0) return k; }
+  return keys[keys.length-1];
+}
+function gauss(m,s){
+  let u=0,v=0; while(!u)u=rnd(); while(!v)v=rnd();
+  return m + s*Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);
+}
+const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+const money = n => '$'+Math.round(n).toLocaleString();
+const waysLabel = n => n===2 ? 'heads up' : n+'-way';
+
+/* --- range parsing: "22+, ATs+, A5s-A2s, KQo, T9s" -> Set of combos --- */
+function expandRange(str){
+  const out = new Set();
+  for(let tok of str.split(',').map(s=>s.trim()).filter(Boolean)){
+    if(/^([2-9TJQKA])\1\+$/.test(tok)){                       // 77+
+      const lo = RVAL[tok[0]];
+      RANKS.filter(r=>RVAL[r]>=lo).forEach(r=>out.add(r+r));
+    } else if(/^([2-9TJQKA])\1-([2-9TJQKA])\2$/.test(tok)){   // 99-55
+      const a=RVAL[tok[0]], b=RVAL[tok[3]], lo=Math.min(a,b), hi=Math.max(a,b);
+      RANKS.filter(r=>RVAL[r]>=lo&&RVAL[r]<=hi).forEach(r=>out.add(r+r));
+    } else if(/^([2-9TJQKA])\1$/.test(tok)){                  // 88
+      out.add(tok);
+    } else if(/^([2-9TJQKA])([2-9TJQKA])(s|o)\+$/.test(tok)){ // ATs+
+      const [,h,k,t] = tok.match(/^([2-9TJQKA])([2-9TJQKA])(s|o)\+$/);
+      for(let v=RVAL[k]; v<RVAL[h]; v++) out.add(h+RANKS[v-2]+t);
+    } else if(/^([2-9TJQKA])([2-9TJQKA])(s|o)-\1([2-9TJQKA])\3$/.test(tok)){ // A5s-A2s
+      const m = tok.match(/^([2-9TJQKA])([2-9TJQKA])(s|o)-\1([2-9TJQKA])\3$/);
+      const h=m[1], t=m[3], a=RVAL[m[2]], b=RVAL[m[4]];
+      for(let v=Math.min(a,b); v<=Math.max(a,b); v++) out.add(h+RANKS[v-2]+t);
+    } else if(/^([2-9TJQKA])([2-9TJQKA])(s|o)$/.test(tok)){   // KQo
+      out.add(tok);
+    }
+  }
+  return out;
+}
+const RANGE_CACHE = {};
+function rangeCombos(key){
+  if(RANGE_CACHE[key]) return RANGE_CACHE[key];
+  const hands = expandRange(RANGES[key] || RANGES['RFI_BTN']);
+  const combos = [];
+  for(const h of hands){
+    const a=h[0], b=h[1], t=h[2];
+    if(a===b){ // pair
+      for(let i=0;i<4;i++) for(let j=i+1;j<4;j++) combos.push([a+SUITS[i], b+SUITS[j]]);
+    } else if(t==='s'){
+      for(const s of SUITS) combos.push([a+s, b+s]);
+    } else {
+      for(const s1 of SUITS) for(const s2 of SUITS) if(s1!==s2) combos.push([a+s1, b+s2]);
+    }
+  }
+  RANGE_CACHE[key] = combos;
+  return combos;
+}
+
+/* --- board texture --- */
+function flopTags(cards){
+  const r = cards.map(c=>RVAL[c[0]]).sort((a,b)=>b-a);
+  const s = cards.map(c=>c[1]);
+  const tags = [];
+  const uniqSuits = new Set(s).size;
+  if(uniqSuits===1) tags.push('monotone');
+  else if(uniqSuits===2) tags.push('two-tone');
+  else tags.push('rainbow');
+  if(new Set(r).size < 3) tags.push('paired');
+  if(r[0]-r[2] <= 4) tags.push('connected');
+  if(r.filter(v=>v>=10).length >= 2) tags.push('broadway-heavy');
+  if(r[0]===14) tags.push('ace-high');
+  if(r[0]<=9) tags.push('low');
+  return tags;
+}
+function cardsExcept(used){
+  const out=[]; for(const r of RANKS) for(const s of SUITS){ const c=r+s; if(!used.has(c)) out.push(c); }
+  return out;
+}
+/* A runout filter is only meaningful if the current board can actually produce it —
+   no turn card completes a flush on a rainbow flop, for instance. */
+function turnCanGive(flop, want){
+  return cardsExcept(new Set(flop)).some(c=>runoutTags(flop,c).includes(want));
+}
+function riverCanGive(board4, want){
+  return cardsExcept(new Set(board4)).some(c=>runoutTags(board4,c).includes(want));
+}
+/* Some flops can never yield the requested river no matter what turn falls
+   (no straight-completing river exists on K-7-2, say). Memoized over the 184. */
+const RIVER_ENABLE = {};
+function flopEnablesRiver(flop, want){
+  const k = flop.join('')+'|'+want;
+  if(k in RIVER_ENABLE) return RIVER_ENABLE[k];
+  let ok = false;
+  for(const t of cardsExcept(new Set(flop))){
+    if(riverCanGive([...flop,t], want)){ ok = true; break; }
+  }
+  return RIVER_ENABLE[k] = ok;
+}
+
+function runoutTags(board, card){
+  const tags = [];
+  const bRanks = board.map(c=>RVAL[c[0]]);
+  const bSuits = board.map(c=>c[1]);
+  const v = RVAL[card[0]], su = card[1];
+  if(bRanks.includes(v)) tags.push('pairs board');
+  if(v > Math.max(...bRanks)) tags.push('overcard');
+  const suitCount = bSuits.filter(x=>x===su).length;
+  if(suitCount >= 2) tags.push('completes flush');
+  else if(suitCount === 1 && board.length===3) tags.push('brings backdoor FD');
+  // straight completion: any 5-window containing the new card filled 4+ by board
+  const all = new Set([...bRanks, v]);
+  for(let lo=2; lo<=10; lo++){
+    const win = [lo,lo+1,lo+2,lo+3,lo+4];
+    if(win.includes(v) && win.filter(x=>all.has(x)).length>=4){
+      const boardOnly = win.filter(x=>bRanks.includes(x)).length;
+      if(boardOnly>=3) { tags.push('completes straight'); break; }
+    }
+  }
+  if(!tags.length) tags.push('blank');
+  return tags;
+}
+
+/* ------------------------------ ENGINE ---------------------------------- */
+
+function newDeck(){
+  const d=[]; for(const r of RANKS) for(const s of SUITS) d.push(r+s);
+  return d;
+}
+function suitPermuteFlop(str){
+  const cards = [str.slice(0,2), str.slice(2,4), str.slice(4,6)];
+  const seen = [], map = {};
+  cards.forEach(c=>{ if(!seen.includes(c[1])) seen.push(c[1]); });
+  const pool = [...SUITS].sort(()=>rnd()-0.5);
+  seen.forEach((s,i)=> map[s]=pool[i]);
+  return cards.map(c=>c[0]+map[c[1]]);
+}
+
+/* Table dynamics a static player-type label can't carry. */
+const FLOW = [
+  {k:'just doubled',        w:6},
+  {k:'stuck',               w:9},
+  {k:'winning big',         w:7},
+  {k:'just lost a big pot', w:7},
+  {k:'on tilt',             w:4},
+  {k:'card dead',           w:6},
+  {k:'just sat down',       w:5},
+  {k:'on phone',            w:6},
+  {k:'drinking',            w:5},
+  {k:'no post',             w:6, str:true},   // didn't straddle back in
+  {k:'straddles every hand',w:4, str:true},
+  {k:'',                    w:35},
+];
+function buildTable(stake, filters){
+  const bbAmt = stake.straddles.length ? stake.straddles[stake.straddles.length-1] : stake.bb;
+  const players = SEATS.map(seat=>{
+    const t = pickW(TYPES, x=>x.w);
+    const cfg = STACKS[t.n];
+    const bbs = clamp(Math.round(gauss(cfg.m,cfg.s)), cfg.lo, cfg.hi);
+    const inc = bbAmt >= 20 ? 25 : 5;
+    const pool = stake.straddles.length ? FLOW : FLOW.filter(x=>!x.str);
+    const flow = pickW(pool, x=>x.w).k;
+    return {
+      seat, type:t.n, group:t.g, flow,
+      stack: Math.max(inc*4, Math.round(bbs*bbAmt/inc)*inc),
+      committed:0, invested:0, folded:false, allIn:false, acted:false, isHero:false
+    };
+  });
+  return {players, bbAmt};
+}
+
+/* preflop order given straddle layout */
+function preflopOrder(stake){
+  const n = stake.straddles.length;
+  if(n===0) return ['UTG','UTG1','LJ','HJ','CO','BTN','SB','BB'];
+  if(stake.btnStraddle){
+    // BTN posted the largest blind; action opens left of it (SB) and BTN closes.
+    return ['SB','BB','UTG','UTG1','LJ','HJ','CO','BTN'];
+  }
+  if(n===1) return ['UTG1','LJ','HJ','CO','BTN','SB','BB','UTG'];
+  return ['LJ','HJ','CO','BTN','SB','BB','UTG','UTG1'];  // UTG + UTG+1 straddles
+}
+function postflopOrder(){ return SEATS.slice(); }  // SB first
+
+/* ------------------------- CONTROLLER / STATE --------------------------- */
+
+let S = null;              // live hand state
+let timer = {id:null, left:0, total:0, expired:false, active:false};
+let sessionLog = [];
+
+function logLine(txt, cls, setup, chrome){
+  S.log.push({txt, cls, street:S.street, setup:!!setup, chrome:!!chrome});
+}
+
+function dealHand(){
+  const f = readFilters();
+  let attempt = 0, ok = false;
+  while(attempt++ < 400 && !ok){ ok = tryBuildHand(f); }
+  if(!ok){ // relax runout filters if impossible
+    f.turn = ''; f.river = '';
+    tryBuildHand(f);
+  }
+  pbStop(); clearPace();
+  document.getElementById('repSec').open = document.getElementById('fReplayer').checked;
+  syncRepClass();
+  try{ window.scrollTo({top:0, behavior:'smooth'}); }catch(e){}
+  render();
+  document.body.classList.add('playing');
+  advance();
+}
+
+function readFilters(){
+  return {
+    timer: +document.getElementById('fTimer').value,
+    stakes: document.getElementById('fStakes').value,
+    pot: document.getElementById('fPot').value,
+    seat: document.getElementById('fSeat').value,
+    ways: document.getElementById('fWays').value,
+    flop: document.getElementById('fFlop').value,
+    turn: document.getElementById('fTurn').value,
+    river: document.getElementById('fRiver').value,
+    model: document.getElementById('fModel').value,
+    drillAt: document.getElementById('fDrillAt').value,
+    lineFlop: document.getElementById('fLineFlop').value,
+    lineTurn: document.getElementById('fLineTurn').value,
+    fixedFlop: document.getElementById('fFixedFlop').value,
+    hideTags: document.getElementById('fHideTags').checked,
+    pacing: document.getElementById('fPacing').checked,
+  };
+}
+
+function tryBuildHand(f){
+  const stake = f.stakes ? STAKES.find(s=>s.id===f.stakes) : pickW(STAKES, s=>s.w);
+  const st = {...stake, straddles:[...stake.straddles]};
+  st.btnStraddle = st.straddles.length>0 && rnd()<0.05;
+
+  const {players, bbAmt} = buildTable(st, f);
+  players.forEach(pl=>{ if((pl.seat==='SB'||pl.seat==='BB') && pl.flow==='no post') pl.flow=''; });
+  const heroSeat = f.seat || SEATS[ri(SEATS.length)];
+  const hero = players.find(p=>p.seat===heroSeat);
+  hero.isHero = true;
+  hero.type = 'Hero'; hero.group='hero'; hero.flow='';
+
+  const targetPot  = f.pot  || pickObjW(POT_TYPE_W);
+  // A scripted line only stays coherent heads up, so force HU when one is set.
+  const scripted   = f.drillAt && f.drillAt!=='preflop';
+  const targetWays = scripted ? 2 : (f.ways ? +f.ways : +pickObjW(WAYS_W));
+  const parseLine = v => v ? {hero:v.split('-')[0], villain:v.split('-')[1]} : null;
+  const line = scripted ? {drillAt:f.drillAt, flop:parseLine(f.lineFlop), turn:parseLine(f.lineTurn)} : null;
+
+  // flop candidates matching texture filter
+  const cands = FLOPS.filter(x=>{
+    const c = [x.slice(0,2), x.slice(2,4), x.slice(4,6)];
+    if(f.flop && !flopTags(c).includes(f.flop)) return false;
+    if(f.turn && !turnCanGive(c, f.turn)) return false;
+    if(f.river && !flopEnablesRiver(c, f.river)) return false;
+    return true;
+  });
+  if(!cands.length) return false;
+
+  S = {
+    stake: st, bbAmt, players, hero, heroSeat,
+    targetPot, targetWays, model: f.model, timerLen: f.timer, line, pacing: f.pacing,
+    filters: f, flopPool: cands,
+    street:'preflop', board:[], deck:newDeck(), reveal:{},
+    pot:0, currentBet:0, lastRaise:0, aggressor:null,
+    order:[], idx:0, log:[], pending:null, over:false,
+    potTypeActual:'Limped', preflopRaises:0, heroRole:null, flagged:false, logEntry:null,
+    flopSnap:null, forced:null, straddles:{}, manualFlop:null, ladder:null, acts:[],
+    frames:null, viewIdx:null, playTimer:null, initialStacks:{},
+    summaryParts:{}
+  };
+
+  S.initialStacks = Object.fromEntries(players.map(pl=>[pl.seat, pl.stack]));
+  postBlinds();
+  const fx = parseFlopInput(f.fixedFlop);
+  if(fx){ S.manualFlop = fx; S.deck = S.deck.filter(c=>!fx.includes(c)); }
+  S.order = preflopOrder(st).map(s=>players.find(p=>p.seat===s));
+  S.idx = 0;
+  buildPlan();
+  dealHero();
+  logLine(`${st.id}${st.btnStraddle?' (BTN straddle)':''} · 8-handed · we are ${seatName(heroSeat)} with ${money(hero.stack)}`,'sys',true);
+  return true;
+}
+
+function postBlinds(){
+  const {stake, players} = S;
+  S.blindSeats = new Set();
+  S.straddles = {};
+  if(stake.straddles.length===1){
+    S.straddles[stake.btnStraddle?'BTN':'UTG'] = stake.straddles[0];
+  } else if(stake.straddles.length===2){
+    S.straddles['UTG'] = stake.straddles[0];
+    S.straddles[stake.btnStraddle?'BTN':'UTG1'] = stake.straddles[1];
+  }
+  const put = (seat, amt, label) => {
+    S.blindSeats.add(seat);
+    const p = players.find(x=>x.seat===seat);
+    const a = Math.min(amt, p.stack);
+    p.stack -= a; p.committed += a; p.invested += a; S.pot += a;
+    if(p.stack===0) p.allIn = true;
+    S.acts.push({street:'preflop', p, kind:'post', amt:a, label});
+    logLine(`${pname(p)} ${p.isHero?'post':'posts'} ${label} ${money(a)}`,'sys',false,true);
+  };
+  put('SB', stake.sb, 'SB');
+  put('BB', stake.bb, 'BB');
+  if(stake.straddles.length===1){
+    put(stake.btnStraddle?'BTN':'UTG', stake.straddles[0], 'straddle');
+  } else if(stake.straddles.length===2){
+    put('UTG', stake.straddles[0], 'straddle');
+    put(stake.btnStraddle?'BTN':'UTG1', stake.straddles[1], 'straddle');
+  }
+  S.currentBet = Math.max(...players.map(p=>p.committed));
+  S.lastRaise = S.currentBet;
+}
+
+/* choose hero's hand from the range matching the node hero will first face */
+/* Build a deterministic preflop script for the target pot type, so the filter
+   actually produces the node it promises rather than nudging probabilities. */
+function buildPlan(){
+  const ord = S.order, hi = ord.indexOf(S.hero);
+  const before = ord.slice(0,hi).filter(p=>!p.isHero);
+  const after  = ord.slice(hi+1).filter(p=>!p.isHero);
+  const pick = a => a.length ? a[ri(a.length)] : null;
+  const plan = {opener:null, threeBet:null, fourBet:null,
+                continuers:new Set(), heroRole:'limp'};
+  const t = S.targetPot;
+
+  if(t==='SRP'){
+    if(after.length && (!before.length || rnd()<0.70)){ plan.opener=S.hero; plan.heroRole='opener'; }
+    else { plan.opener=pick(before); plan.heroRole='caller'; }
+  } else if(t==='3BP'){
+    if(before.length && (!after.length || rnd()<0.60)){
+      plan.opener=pick(before); plan.threeBet=S.hero; plan.heroRole='3bettor';
+    } else if(after.length){
+      plan.opener=S.hero; plan.threeBet=pick(after); plan.heroRole='opener-vs-3bet';
+    } else { plan.heroRole='limp'; }
+  } else if(t==='4BP'){
+    if(after.length){
+      plan.opener=S.hero; plan.threeBet=pick(after); plan.fourBet=S.hero;
+      plan.heroRole='opener-vs-3bet';
+    } else if(before.length){
+      plan.opener=pick(before); plan.threeBet=S.hero; plan.fourBet=plan.opener;
+      plan.heroRole='3bettor';
+    }
+  }
+
+  // Fill continuers up to the target number of players seeing the flop.
+  [plan.opener, plan.threeBet, plan.fourBet].forEach(x=>{ if(x && !x.isHero) plan.continuers.add(x); });
+  const pool = S.players.filter(x=>!x.isHero && !plan.continuers.has(x))
+                        .sort(()=>rnd()-0.5);
+  while(plan.continuers.size < S.targetWays-1 && pool.length) plan.continuers.add(pool.pop());
+
+  S.plan = plan;
+  S.heroRole = plan.heroRole;
+}
+
+function dealHero(){
+  const seat = S.heroSeat, role = S.plan.heroRole;
+  let key;
+  if(role==='limp')                key = seat==='SB'?'ISO_SB' : seat==='BB'?'ISO_BB'
+                                       : ['CO','BTN'].includes(seat)?'ISO_LATE':'ISO_EARLY';
+  else if(role==='opener' ||
+          role==='opener-vs-3bet') key = seat==='BB' ? 'ISO_BB' : ('RFI_'+seat);
+  else                             key = 'VS_OPEN_MED';   // caller / 3bettor facing an open
+  if(!RANGES[key]) key = 'RFI_BTN';
+
+  const avail = new Set(S.deck);
+  let combos = rangeCombos(key).filter(x=>avail.has(x[0]) && avail.has(x[1]));
+  if(!combos.length) combos = [[S.deck[0], S.deck[1]]];
+  const c = combos[ri(combos.length)];
+  S.hero.cards = c;
+  S.heroRangeKey = key;
+  S.deck = S.deck.filter(x=>!c.includes(x));
+}
+
+/* ------------------------- BETTING STATE MACHINE ------------------------ */
+
+function livePlayers(){ return S.players.filter(p=>!p.folded); }
+function activePlayers(){ return S.players.filter(p=>!p.folded && !p.allIn); }
+
+function bettingClosed(){
+  const live = livePlayers();
+  if(live.length<=1) return true;
+  const act = activePlayers();
+  if(act.length===0) return true;
+  if(act.length===1 && live.length>1){
+    const only = act[0];
+    if(only.acted && only.committed>=S.currentBet) return true;
+    if(only.committed>=S.currentBet && live.filter(p=>p!==only).every(p=>p.allIn)) return true;
+  }
+  return act.every(p=>p.acted && p.committed===S.currentBet);
+}
+
+function nextActor(){
+  for(let k=0;k<S.order.length*2;k++){
+    const p = S.order[(S.idx+k)%S.order.length];
+    if(p.folded||p.allIn) continue;
+    if(!p.acted || p.committed < S.currentBet){
+      S.idx = (S.idx+k)%S.order.length;
+      return p;
+    }
+  }
+  return null;
+}
+
+let paceTimer = null;
+function clearPace(){ if(paceTimer){ clearTimeout(paceTimer); paceTimer = null; } }
+const PACE = {hero:3000, villain:1000, board:1000};
+function paceMs(kind){ return (S && S.pacing) ? PACE[kind] : 0; }
+
+/* One unit of engine work, then schedule the next with a lifelike pause. */
+function advance(delay){
+  clearPace();
+  if(!S || S.over) return;
+  if(delay > 0){ paceTimer = setTimeout(()=>{ paceTimer = null; stepOnce(); }, delay); return; }
+  stepOnce();
+}
+
+function stepOnce(){
+  if(!S || S.over){ render(); return; }
+  const actor = nextActor();
+  if(bettingClosed() || !actor){
+    endStreet();                                  // deals the next board card(s)
+    if(S.over){ render(); return; }
+    render();
+    advance(paceMs('board'));
+    return;
+  }
+  if(actor.isHero){
+    const sc = heroScripted();
+    if(sc){
+      applyScript(actor, sc);
+      S.idx = (S.idx+1)%S.order.length;
+      render();
+      advance(bettingClosed() ? paceMs('board') : paceMs('hero'));
+      return;
+    }
+    promptHero(actor); render(); return;
+  }
+  const before = S.acts.length;
+  const vs = S.street==='preflop' ? null : villainScripted(actor);
+  if(vs) applyScript(actor, vs); else villainAct(actor);
+  S.idx = (S.idx+1)%S.order.length;
+  // An open fold is invisible on the felt, so pausing for it is dead time.
+  const last = S.acts[S.acts.length-1];
+  const silent = S.acts.length > before && last && last.kind==='fold' && last.open;
+  render();
+  if(livePlayers().length===1){ endStreet(); render(); return; }
+  advance(silent ? 0 : (bettingClosed() ? paceMs('board') : paceMs('villain')));
+}
+
+function collect(){
+  S.players.forEach(p=>{ p.committed=0; p.acted=false; });
+  S.currentBet=0; S.lastRaise=0;
+}
+
+function endStreet(){
+  if(S.street==='preflop'){
+    S.potTypeActual = S.preflopRaises>=3 ? '4BP' : S.preflopRaises===2 ? '3BP'
+                    : S.preflopRaises===1 ? 'SRP' : 'Limped';
+  }
+  if(livePlayers().length===1){
+    const w = livePlayers()[0];
+    logLine(`${pname(w)} ${w.isHero?'take':'takes'} the pot — ${money(S.pot)}. Hand over.`, w.isHero?'hero':'sys');
+    finish(); return;
+  }
+  if(S.street==='preflop'){
+    collect();
+    dealFlop();
+    S.street='flop';
+  } else if(S.street==='flop'){
+    collect(); dealRunout('turn'); S.street='turn';
+  } else if(S.street==='turn'){
+    collect(); dealRunout('river'); S.street='river';
+  } else {
+    logLine('River action complete. No showdown — villain cards are not modelled.','sys');
+    finish(); return;
+  }
+  // Volume model: decide up front whether this street is allowed to end in a fold.
+  // Flop survives ~90%, turn survives ~83% -> river reached ~75% of hands.
+  S.streetMayEnd = S.street==='flop' ? (rnd() < 0.10)
+                 : S.street==='turn' ? (rnd() < 0.17)
+                 : true;
+  // set postflop order & reset pointer
+  S.order = postflopOrder().map(s=>S.players.find(p=>p.seat===s)).filter(p=>!p.folded);
+  S.idx = 0;
+  S.prevAggressor = S.aggressor;
+  S.aggressor = null;
+  if(S.street==='flop' && !S.flopSnap) S.flopSnap = {
+    pot:S.pot, board:[...S.board], flopReveal:{...S.reveal.flop},
+    logLen:S.log.length, potTypeActual:S.potTypeActual, flopWays:S.flopWays,
+    prevAggressorSeat: S.prevAggressor ? S.prevAggressor.seat : null,
+    ps:S.players.map(p=>({seat:p.seat,stack:p.stack,committed:p.committed,
+                          invested:p.invested,folded:p.folded,allIn:p.allIn}))
+  };
+}
+
+function parseFlopInput(raw){
+  if(!raw) return null;
+  const m = raw.trim().replace(/\s+/g,'').match(/^([2-9TJQKAtjqka][shdcSHDC]){3}$/);
+  if(!m) return null;
+  const t = raw.trim().replace(/\s+/g,'');
+  const cards = [0,2,4].map(i=>t[i].toUpperCase()+t[i+1].toLowerCase());
+  return new Set(cards).size===3 ? cards : null;
+}
+
+function dealFlop(){
+  const f = S.filters;
+  let cards = S.manualFlop || null;
+  for(let i=0;i<500 && !cards;i++){   // eslint-disable-line
+    const raw = S.flopPool[ri(S.flopPool.length)];
+    const c = suitPermuteFlop(raw);
+    if(c.some(x=>!S.deck.includes(x))) continue;
+    if(f.flop && !flopTags(c).includes(f.flop)) continue;
+    cards = c;
+  }
+  if(!cards){ // fallback: any legal flop from pool
+    for(const raw of S.flopPool){
+      const c = suitPermuteFlop(raw);
+      if(c.every(x=>S.deck.includes(x))){ cards=c; break; }
+    }
+  }
+  S.board = cards;
+  S.deck = S.deck.filter(x=>!cards.includes(x));
+  S.flopTags = flopTags(cards);
+  S.flopWays = livePlayers().length;
+  S.reveal.flop = {cards, tags:S.flopTags, potAt:S.pot, ways:S.flopWays};
+}
+
+function dealRunout(which){
+  const want = which==='turn' ? S.filters.turn : S.filters.river;
+  // A manually chosen card from the replay editor overrides every filter.
+  if(S.forced && S.forced[which] && S.deck.includes(S.forced[which])){
+    const card = S.forced[which];
+    const tags = runoutTags(S.board, card);
+    S.deck = S.deck.filter(x=>x!==card);
+    S.board = [...S.board, card];
+    if(which==='turn') S.turnTags=tags; else S.riverTags=tags;
+    S.reveal[which] = {cards:[card], tags, potAt:S.pot, ways:livePlayers().length};
+    return;
+  }
+  let pool = [...S.deck];
+  if(want){
+    const m = pool.filter(c=>runoutTags(S.board,c).includes(want));
+    if(m.length) pool = m;
+  }
+  if(which==='turn' && S.filters.river){
+    const keep = pool.filter(c=>riverCanGive([...S.board,c], S.filters.river));
+    if(keep.length) pool = keep;
+  }
+  let card = pool[ri(pool.length)], tags=null;
+  tags = runoutTags(S.board, card);
+  S.deck = S.deck.filter(x=>x!==card);
+  S.board = [...S.board, card];
+  if(which==='turn') S.turnTags=tags; else S.riverTags=tags;
+  S.reveal[which] = {cards:[card], tags, potAt:S.pot, ways:livePlayers().length};
+}
+
+/* Replay the same flop with an edited hand and/or a chosen runout. Stacks,
+   opponents and the whole preflop story are restored exactly as they were. */
+function replayFromFlop(newHole, forcedTurn, forcedRiver){
+  const snap = S.flopSnap; if(!snap) return;
+  S.players.forEach(p=>{
+    const q = snap.ps.find(x=>x.seat===p.seat);
+    p.stack=q.stack; p.committed=q.committed; p.invested=q.invested;
+    p.folded=q.folded; p.allIn=q.allIn; p.acted=false;
+  });
+  S.pot = snap.pot;
+  S.board = [...snap.board];
+  S.reveal = {flop: snap.flopReveal};
+  S.log = S.log.slice(0, snap.logLen);
+  S.potTypeActual = snap.potTypeActual; S.flopWays = snap.flopWays;
+  S.street='flop'; S.currentBet=0; S.lastRaise=0; S.aggressor=null;
+  S.prevAggressor = snap.prevAggressorSeat
+    ? S.players.find(p=>p.seat===snap.prevAggressorSeat) : null;
+  S.order = postflopOrder().map(x=>S.players.find(p=>p.seat===x)).filter(p=>!p.folded);
+  S.idx=0; S.over=false; S.pending=null; S.flagged=false; S.logEntry=null;
+  S.turnTags=null; S.riverTags=null; S.streetMayEnd = rnd()<0.10;
+  if(newHole) S.hero.cards = newHole;
+  S.forced = {turn:forcedTurn||null, river:forcedRiver||null};
+  const used = new Set([...S.board, ...S.hero.cards]);
+  S.deck = newDeck().filter(c=>!used.has(c));
+  if(S.ladder) logLine(`ladder rung ${S.ladder.idx+1} of ${S.ladder.rungs.length}`,'sys');
+  else logLine('replaying this flop — '+S.hero.cards.join(' ')
+          + (forcedTurn?' · turn '+forcedTurn:'') + (forcedRiver?' · river '+forcedRiver:''),
+          'sys', false, false);
+  S.acts = S.acts.filter(a=>a.street==='preflop');
+  document.body.classList.add('playing');
+  document.getElementById('flagBtn').classList.remove('flagged');
+  render(); advance();
+}
+
+/* ---- Runout ladder ----------------------------------------------------
+   Hold the spot still and walk a set of strategically distinct runouts back to
+   back. Rungs are chosen one per texture category. */
+const RUNOUT_CATS = ['completes flush','completes straight','pairs board','overcard','brings backdoor FD','blank'];
+
+function pickDistinct(board, pool, count, offset, avoid){
+  const out=[], used=new Set();
+  const rot = RUNOUT_CATS.slice(offset||0).concat(RUNOUT_CATS.slice(0, offset||0));
+  const cats = (avoid && avoid.size) ? rot.filter(c=>!avoid.has(c)).concat(rot.filter(c=>avoid.has(c))) : rot;
+  for(const cat of cats){
+    if(out.length>=count) break;
+    const m = pool.filter(c=>!used.has(c) && runoutTags(board,c).includes(cat));
+    if(m.length){ const c=m[ri(m.length)]; out.push(c); used.add(c); if(avoid) avoid.add(cat); }
+  }
+  while(out.length<count){
+    const rest = pool.filter(c=>!used.has(c));
+    if(!rest.length) break;
+    const c = rest[ri(rest.length)]; out.push(c); used.add(c);
+  }
+  return out.slice(0,count);
+}
+
+function buildLadder(kind, n){
+  const flop = S.board.slice(0,3), hole = [...S.hero.cards];
+  const avail = newDeck().filter(c=>!flop.includes(c) && !hole.includes(c));
+  let rungs;
+  if(kind==='turn'){
+    rungs = pickDistinct(flop, avail, n).map(t=>({turn:t, river:null}));
+  } else if(kind==='river'){
+    const t = S.board[3] && !hole.includes(S.board[3]) ? S.board[3] : avail[ri(avail.length)];
+    rungs = pickDistinct([...flop,t], avail.filter(c=>c!==t), n).map(r=>({turn:t, river:r}));
+  } else {
+    const usedRiverCats = new Set();
+    rungs = pickDistinct(flop, avail, n).map((t,i)=>{
+      const r = pickDistinct([...flop,t], avail.filter(c=>c!==t), 1, i, usedRiverCats)[0];
+      return {turn:t, river:r};
+    });
+  }
+  S.ladder = {kind, rungs, idx:-1, hole};
+  nextRung();
+}
+
+function nextRung(){
+  const L = S.ladder; if(!L) return;
+  L.idx++;
+  if(L.idx >= L.rungs.length){ S.ladder=null; render(); return; }
+  const r = L.rungs[L.idx];
+  replayFromFlop(L.hole, r.turn, r.river);
+}
+
+function parseHole(str){
+  const m = (str||'').trim().replace(/\s+/g,'').match(/^([2-9TJQKAtjqka])([shdcSHDC])([2-9TJQKAtjqka])([shdcSHDC])$/);
+  if(!m) return null;
+  const a = m[1].toUpperCase()+m[2].toLowerCase();
+  const b = m[3].toUpperCase()+m[4].toLowerCase();
+  if(a===b) return null;
+  if(S.board.slice(0,3).includes(a) || S.board.slice(0,3).includes(b)) return null;
+  return [a,b];
+}
+
+let lastFinish = 0;
+function finish(){
+  S.over = true; S.pending=null; stopTimer(); clearPace();
+  lastFinish = Date.now();
+  document.body.classList.remove('playing');
+  buildSummary();
+  S.logEntry = {flagged:!!S.flagged, text:document.getElementById('summary').value};
+  sessionLog.push(S.logEntry);
+}
+
+function toggleFlag(){
+  if(!S) return;
+  S.flagged = !S.flagged;
+  if(S.logEntry) S.logEntry.flagged = S.flagged;
+  buildSummary();
+  if(S.logEntry) S.logEntry.text = document.getElementById('summary').value;
+  document.getElementById('flagBtn').classList.toggle('flagged', S.flagged);
+}
+
+/* ----------------------------- ACTIONS ---------------------------------- */
+
+function commit(p, amount){
+  const a = Math.min(amount, p.stack);
+  p.stack -= a; p.committed += a; p.invested += a; S.pot += a;
+  if(p.stack===0) p.allIn = true;
+  return a;
+}
+
+/* A straddled seat is named by its straddle, not its nominal position — calling
+   the $10 straddle "UTG" wrongly implies they act first. */
+function seatName(seat){
+  const amt = S && S.straddles ? S.straddles[seat] : null;
+  if(!amt) return SEAT_LABEL[seat];
+  return (seat==='BTN' ? 'BTN STR ' : 'STR ') + money(amt);
+}
+function pname(p){ return p.isHero ? 'We' : `${seatName(p.seat)} (${p.type})`; }
+
+function doFold(p){
+  p.folded=true; p.acted=true;
+  // Open folds preflop are invisible at a real table — no chips in, nothing to read.
+  const openFold = S.street==='preflop' && p.invested===0 && !p.isHero;
+  S.acts.push({street:S.street, p, kind:'fold', open:openFold});
+  if(openFold) return;                       // invisible in the text history
+  logLine(`${pname(p)} ${p.isHero?'fold':'folds'}`, p.isHero?'hero':'');
+}
+function doCall(p){
+  const need = S.currentBet - p.committed;
+  const a = commit(p, need);
+  p.acted=true;
+  if(need<=0){ S.acts.push({street:S.street, p, kind:'check'});
+    logLine(`${pname(p)} ${p.isHero?'check':'checks'}`, p.isHero?'hero':''); return; }
+  const limp = S.street==='preflop' && S.preflopRaises===0;
+  S.acts.push({street:S.street, p, kind:limp?'limp':'call', amt:a});
+  logLine(`${pname(p)} ${limp ? (p.isHero?'limp':'limps')
+                              : (p.isHero?'call':'calls')+' '+money(a)}${p.allIn?' (all in)':''}`,
+          p.isHero?'hero':'');
+}
+function doRaise(p, to){
+  const capped = Math.min(to, p.committed + p.stack);
+  const prev = S.currentBet;
+  // A short all-in that cannot reach the current bet is a call for less, not a
+  // raise — otherwise it would drag the current bet down below what others owe.
+  if(capped <= prev){ doCall(p); return; }
+  const a = commit(p, capped - p.committed);
+  p.acted=true;
+  const full = (capped - prev) >= S.lastRaise;      // incomplete all-in doesn't reopen action
+  S.players.forEach(x=>{
+    if(x===p || x.folded || x.allIn) return;
+    if(full || x.committed < prev) x.acted = false;
+  });
+  S.lastRaise = Math.max(S.lastRaise, capped - prev);
+  S.currentBet = capped;
+  S.aggressor = p;
+  if(S.street==='preflop') S.preflopRaises++;
+  const checkedAlready = S.acts.some(x=>x.street===S.street && x.p===p && x.kind==='check');
+  S.acts.push({street:S.street, p, kind:prev===0?'bet':'raise', to:capped,
+               xr:checkedAlready, pf:S.street==='preflop'?S.preflopRaises:0,
+               limpers:S.street==='preflop' && S.players.some(x=>x!==p && x.committed>0 && !S.blindSeats.has(x.seat))});
+  const verb = p.isHero ? (prev===0?'bet':'raise to') : (prev===0?'bets':'raises to');
+  logLine(`${pname(p)} ${verb} ${money(capped)}${p.allIn?' (all in)':''}`, p.isHero?'hero':'');
+}
+
+/* --------------------------- VILLAIN MODEL ------------------------------ */
+
+function villainAct(p){
+  if(S.street==='preflop') return villainPreflop(p);
+  return villainPostflop(p);
+}
+
+const STREET_IDX = {preflop:0, flop:1, turn:2, river:3};
+/* Scripted bets are capped so nobody gets stacked before reaching the node
+   the line is meant to drill. */
+function scriptBet(p, frac){
+  const raw = Math.max(S.bbAmt, Math.round(S.pot*(frac||0.6)));
+  const cap = Math.max(S.bbAmt, Math.round((p.committed + p.stack)*0.40));
+  return Math.round(Math.min(raw, cap)/S.bbAmt)*S.bbAmt;
+}
+const beforeDrill = () => S.line && STREET_IDX[S.street] <  STREET_IDX[S.line.drillAt];
+const atDrill     = () => S.line && STREET_IDX[S.street] === STREET_IDX[S.line.drillAt];
+
+/* Streets ahead of the drill point are played for us, so the clock only ever
+   starts at the node the line describes. */
+function heroScripted(){
+  if(!beforeDrill()) return null;
+  if(S.street==='preflop'){
+    const role = S.plan.heroRole, r = S.preflopRaises;
+    if((role==='opener'||role==='opener-vs-3bet') && r===0) return {act:'raise', to:Math.round(4.5*S.bbAmt)};
+    if(role==='opener-vs-3bet' && r===2 && S.plan.fourBet===S.hero) return {act:'raise', to:Math.round(S.currentBet*2.6)};
+    if(role==='3bettor' && r===1) return {act:'raise', to:Math.round(S.currentBet*4)};
+    return {act:'call'};
+  }
+  const spec = S.line[S.street];
+  const toCall = S.currentBet - S.hero.committed;
+  if(toCall>0) return {act:'call'};                       // facing action: continue the line
+  if(spec && spec.hero==='bet') return {act:'raise', to:scriptBet(S.hero)};
+  return {act:'call'};                                    // check
+}
+
+/* Villains are held to the script up to the drill point; on the drill street
+   itself only a scripted lead is forced, since our action there is live. */
+function villainScripted(p){
+  if(!S.line) return null;
+  const spec = S.line[S.street];
+  if(!spec) return null;
+  const toCall = S.currentBet - p.committed;
+  if(atDrill()){
+    if(spec.villain==='lead' && toCall<=0) return {act:'raise', to:scriptBet(p)};
+    return null;
+  }
+  if(!beforeDrill()) return null;
+  if(toCall>0){
+    if(spec.villain==='call')  return {act:'call'};
+    if(spec.villain==='raise') return {act:'raise', to:Math.min(Math.round(S.currentBet*3), p.committed+p.stack)};
+    return {act:'call'};
+  }
+  if(spec.hero==='bet')        return {act:'call'};        // check to us so we can bet
+  if(spec.villain==='lead')    return {act:'raise', to:scriptBet(p)};
+  return {act:'call'};                                     // check through
+}
+
+function applyScript(p, sc){
+  if(sc.act==='call') doCall(p); else doRaise(p, sc.to);
+}
+
+/* A villain fold that would leave one player is suppressed while we still want
+   a flop. Preflop: always, unless the pot is already 4bet+ (S.preflopRaises>=3).
+   Postflop: governed by the per-street coin flip set in endStreet(). */
+function foldEndsHand(p){ return livePlayers().filter(x=>x!==p).length <= 1; }
+function foldAllowed(p){
+  if(!foldEndsHand(p)) return true;
+  if(S.line && (beforeDrill() || atDrill())) return false;   // the line must survive to the node
+  if(S.ladder && S.board.length < 5) return false;           // the rung's runout must actually appear
+  if(S.street==='preflop') return S.preflopRaises >= 3;
+  if(S.model !== 'volume') return true;
+  return S.streetMayEnd;
+}
+
+/* Live opens with the straddle on cluster at 3x-4x; bigger sizes are rare and
+   usually mean a strong hand, an iso, or boredom. */
+const OPEN_MULT   = {'3':30, '3.5':28, '4':24, '4.5':7, '5':5, '6':4, '7':2};
+const ISO_MULT    = {'4':22, '4.5':22, '5':20, '6':18, '7':11, '8':7};
+function openSize(p){
+  const bb = S.bbAmt;
+  const limpers = S.players.filter(x=>x!==p && !x.folded && x.committed>0
+                                   && !S.blindSeats.has(x.seat)).length;
+  const base = parseFloat(pickObjW(limpers>0 ? ISO_MULT : OPEN_MULT));
+  const mult = base + limpers;                        // +1bb per limper
+  const step = Math.max(5, bb/2);                     // round to a real chip amount
+  const amt  = Math.round(mult*bb/step)*step;
+  return Math.max(S.currentBet*2, amt);
+}
+function threeBetSize(p){
+  const ip = !['SB','BB'].includes(p.seat);
+  return Math.round(S.currentBet*(ip?4.0:4.6)/S.bbAmt)*S.bbAmt;
+}
+function fourBetSize(p){
+  return Math.round(S.currentBet*2.6/S.bbAmt)*S.bbAmt;
+}
+
+function villainPreflop(p){
+  const cfg  = PF[p.type];
+  const plan = S.plan;
+  const toCall = S.currentBet - p.committed;
+
+  // Designated aggressors act on cue — this is what makes the pot-type filter real.
+  if(S.preflopRaises===0 && plan.opener===p)   { doRaise(p, openSize(p));     return; }
+  if(S.preflopRaises===1 && plan.threeBet===p) { doRaise(p, threeBetSize(p)); return; }
+  if(S.preflopRaises===2 && plan.fourBet===p)  { doRaise(p, fourBetSize(p));  return; }
+
+  // Past a 4bet, everyone plays their own type — these pots are allowed to end preflop.
+  if(S.preflopRaises>=3){
+    const a = pickObjW(cfg.vs4B);
+    if(a==='fold'){ if(foldAllowed(p)) doFold(p); else doCall(p); return; }
+    if(a==='call'){ doCall(p); return; }
+    doRaise(p, p.committed + p.stack); return;                 // 5bet jam
+  }
+
+  // Unopened / limped pot: no undesignated villain opens the pot.
+  if(S.preflopRaises===0){
+    if(toCall<=0){ doCall(p); return; }                        // blind checks its option
+    if(plan.continuers.has(p)){ doCall(p); return; }
+    const a = pickObjW({limp:cfg.open.limp, fold:cfg.open.fold+cfg.open.raise});
+    if(a==='limp'){ doCall(p); return; }
+    if(foldAllowed(p)) doFold(p); else doCall(p);
+    return;
+  }
+
+  // Facing a raise or 3bet: only the planned continuers come along.
+  if(plan.continuers.has(p)){ doCall(p); return; }
+  if(foldAllowed(p)) doFold(p); else doCall(p);
+}
+
+function raiseSize(p, faceBet, pot){
+  const r = rnd();
+  if(r<.22) return S.currentBet + S.lastRaise;                       // min raise
+  if(r<.85){
+    const mult = 3 + rnd()*3;                                        // 3x - 6x
+    return Math.round(S.currentBet*mult);
+  }
+  return p.committed + p.stack;                                      // jam
+}
+
+/* A river changes the nuts if it completes a flush or straight, or pairs the
+   highest card already on board. */
+function nutChangingRiver(){
+  if(S.street!=='river' || !S.riverTags) return false;
+  if(S.riverTags.includes('completes flush') || S.riverTags.includes('completes straight')) return true;
+  const rv  = RVAL[S.board[4][0]];
+  const top = Math.max(...S.board.slice(0,4).map(c=>RVAL[c[0]]));
+  return rv === top;
+}
+
+function villainPostflop(p){
+  const cfg = POST[p.type];
+  const pot = S.pot;
+  const toCall = S.currentBet - p.committed;
+  const hu = livePlayers().length===2;
+
+  if(toCall<=0){
+    // Betting into last street's aggressor before they act is a donk bet — rare.
+    const isDonk = S.prevAggressor && !S.prevAggressor.folded
+                   && S.prevAggressor !== p && !S.prevAggressor.acted;
+    let betFreq;
+    if(isDonk){
+      const base = S.street==='flop' ? 0.10
+                 : S.street==='turn' ? 0.05
+                 : (nutChangingRiver() ? 0.20 : 0.05);
+      betFreq = base * clamp(cfg.bet/0.33, 0.6, 1.5);   // aggro types donk a little more
+    } else {
+      betFreq = cfg.bet * (S.street==='river'?0.85:1) * (hu?1:0.8);
+    }
+    if(rnd() < betFreq){
+      const frac = [0.33,0.5,0.66,0.75,1.0][ri(5)];
+      doRaise(p, Math.max(S.bbAmt, Math.round(pot*frac/S.bbAmt)*S.bbAmt));
+    } else { doCall(p); }
+    return;
+  }
+
+  // facing a bet
+  const ratio = toCall / Math.max(pot,1);
+  let foldP;
+  if(S.street==='river'){
+    // realistic: base fold scaled by price
+    foldP = clamp(cfg.rFold * (0.55 + 0.75*Math.min(ratio,1.6)), .05, .88);
+  } else if(S.model==='volume'){
+    foldP = clamp(0.16 + 0.10*Math.min(ratio,1.5) + (cfg.rFold-0.35)*0.30, .05, .40);
+  } else {
+    foldP = clamp(cfg.rFold*0.82 * (0.6+0.7*Math.min(ratio,1.5)), .05, .80);
+  }
+  let raiseP = cfg.raise * (S.street==='river'?0.75:1);
+  if(rnd()<foldP){ if(foldAllowed(p)){ doFold(p); return; } doCall(p); return; }
+  if(rnd()<raiseP/(1-foldP)){ doRaise(p, raiseSize(p, toCall, pot)); return; }
+  doCall(p);
+}
+
+/* ------------------------------ HERO TURN ------------------------------- */
+
+function promptHero(p){
+  const toCall = S.currentBet - p.committed;
+  S.pending = {player:p, toCall};
+  startTimer();
+}
+
+function setErr(msg){
+  const e = document.getElementById('heroErr'); if(e) e.textContent = msg;
+}
+function heroAct(kind, sizeStr){
+  if(!S || !S.pending) return;
+  const p = S.pending.player, toCall = S.pending.toCall;
+  const err = {set textContent(v){ setErr(v); }};
+  err.textContent='';
+  if(kind==='fold'){ doFold(p); }
+  else if(kind==='call'){ doCall(p); }
+  else {
+    const to = parseSize(sizeStr, toCall, p);
+    if(to===null){ err.textContent='Enter a size: 150, $150, 60%, 3x, pot, or jam.'; return; }
+    const minTo = S.currentBet===0 ? S.bbAmt : S.currentBet + Math.max(S.lastRaise, S.bbAmt);
+    const maxTo = p.committed + p.stack;
+    if(to < minTo && to < maxTo){ err.textContent=`Minimum is ${money(minTo)} (or jam ${money(maxTo)}).`; return; }
+    doRaise(p, to);
+  }
+  S.pending=null; stopTimer();
+  S.idx = (S.idx+1)%S.order.length;
+  render();
+  advance(bettingClosed() ? paceMs('board') : paceMs('hero'));
+}
+
+function parseSize(raw, toCall, p){
+  if(!raw) return null;
+  let s = raw.trim().toLowerCase().replace(/[$,]/g,'');
+  const maxTo = p.committed + p.stack;
+  if(s==='jam'||s==='allin'||s==='all-in'||s==='shove') return maxTo;
+  if(s==='pot'){ return S.currentBet + (S.pot + toCall) + toCall; }
+  if(s.endsWith('%')){
+    const pct = parseFloat(s)/100; if(isNaN(pct)) return null;
+    return Math.round(S.currentBet + (S.pot + toCall)*pct + toCall);
+  }
+  if(s.endsWith('x')){
+    const m = parseFloat(s); if(isNaN(m)) return null;
+    return Math.round(S.currentBet ? S.currentBet*m : S.bbAmt*m);
+  }
+  const n = parseFloat(s);
+  return isNaN(n) ? null : Math.round(n);
+}
+
+/* ------------------------------ TIMER ----------------------------------- */
+
+/* Preflop is capped at 10s no matter what the filter says — that's closer to
+   the time you actually get before the action is on you. */
+function timerFor(){
+  return S.street==='preflop' ? Math.min(S.timerLen, 10) : S.timerLen;
+}
+function startTimer(){
+  stopTimer();
+  const len = timerFor();
+  timer.total = len; timer.left = len;
+  timer.expired=false; timer.active=true;
+  paintClock();
+  timer.id = setInterval(()=>{
+    timer.left -= 0.1;
+    if(timer.left<=0){ timer.left=0; if(!timer.expired){ timer.expired=true; beep(); } }
+    paintClock();
+  }, 100);
+}
+function stopTimer(){ if(timer.id) clearInterval(timer.id); timer.id=null; timer.active=false; paintClock(); }
+function paintClock(){
+  const el = document.getElementById('clock');
+  document.getElementById('clockT').textContent = timer.active ? timer.left.toFixed(1) : '--';
+  document.getElementById('clockBar').style.width = timer.active ? (100*timer.left/timer.total)+'%' : '100%';
+  el.classList.toggle('expired', timer.expired);
+  document.getElementById('clockL').textContent = timer.active
+    ? (timer.expired ? 'time expired — finish your read and act' : 'decision clock running')
+    : 'no active decision';
+}
+function beep(){
+  try{
+    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.frequency.value = 660; g.gain.value = 0.12;
+    o.start(); setTimeout(()=>{o.stop(); ctx.close();}, 260);
+  }catch(e){}
+}
+
+/* ------------------------------ REPLAYER -------------------------------- */
+
+/* Rebuild the whole hand as frames by replaying the recorded actions.
+   Frame 0 is the table before anyone acts; the last frame is the live state. */
+function buildFrames(){
+  const seats = {};
+  S.players.forEach(p=>seats[p.seat] = {stack:S.initialStacks[p.seat], committed:0, invested:0, folded:false});
+  let pot = 0, board = [], street = 'preflop';
+  let lastAct = {};                      // seat -> most recent action this street
+  const frames = [];
+  let dirty = false;                    // state changed with no frame taken since
+  const snap = (label, actor) => {
+    dirty = false;
+    frames.push({
+      street, board:[...board], pot, label, actor, acts:{...lastAct},
+      seats: Object.fromEntries(Object.entries(seats).map(([k,v])=>[k,{...v}]))
+    });
+  };
+  const put = (seat, amt) => {
+    const v = seats[seat], d = Math.min(amt, v.stack);
+    v.stack -= d; v.committed += d; v.invested += d; pot += d;
+  };
+
+  snap('cards dealt', null);
+  for(const st of ['preflop','flop','turn','river']){
+    if(st !== 'preflop'){
+      const rev = S.reveal[st]; if(!rev) break;
+      Object.values(seats).forEach(v=>v.committed = 0);
+      lastAct = {};                      // fresh street, fresh action labels
+      street = st; board = [...board, ...rev.cards];
+      snap(st.toUpperCase(), null);
+    }
+    for(const a of S.acts.filter(x=>x.street===st)){
+      const v = seats[a.p.seat];
+      let label;
+      if(a.kind==='fold' && a.open){ v.folded = true; dirty = true; continue; }  // no frame for an open fold
+      if(a.kind==='fold'){ v.folded = true; label = 'folds'; }
+      else if(a.kind==='check'){ label = 'checks'; }
+      else if(a.kind==='post'){ put(a.p.seat, a.amt); label = a.label; }
+      else if(a.kind==='limp'){ put(a.p.seat, a.amt); label = 'limps'; }
+      else if(a.kind==='call'){ put(a.p.seat, a.amt); label = 'calls ' + money(a.amt); }
+      else { put(a.p.seat, a.to - v.committed);
+             label = (a.kind==='bet' ? 'bets ' : 'raises to ') + money(a.to); }
+      lastAct[a.p.seat] = label;
+      snap(label, a.p.seat);
+    }
+  }
+  // Trailing open folds change the table without producing a frame, so without
+  // this the live view would still show them holding cards.
+  if(dirty) snap('', null);
+  return frames;
+}
+
+/* Explicit seat coordinates, hero at the bottom and the rest clockwise.
+   A uniform 45-degree ring overlaps on the sides once the boxes are this tall,
+   so the side seats are spread vertically instead. Verified pairwise. */
+const SEAT_XY = [
+  [50, 85],  // 0  bottom centre — hero
+  [22, 79],  // 1  bottom left
+  [ 8, 49],  // 2  left
+  [22, 19],  // 3  top left
+  [50, 15],  // 4  top centre
+  [78, 19],  // 5  top right
+  [92, 49],  // 6  right
+  [78, 79],  // 7  bottom right
+];
+function seatPos(i){ const [x,y] = SEAT_XY[i]; return {x, y}; }
+
+/* Button sits just inside the seat box, on the side facing the table. */
+function buttonPos(i){
+  const {x,y} = seatPos(i);
+  const HW = 7.0, HH = 13.5;            // half box, in % of the wrap
+  if(x < 40)  return {x: x + HW + 2.5, y};
+  if(x > 60)  return {x: x - HW - 2.5, y};
+  return {x, y: y < 50 ? y + HH + 3 : y - HH - 3};
+}
+/* Chips scale with what's in front of a player, coloured like casino denominations. */
+function chipsHTML(amt){
+  if(!amt) return '';
+  const bb = S.bbAmt;
+  const n = amt >= 15*bb ? 3 : amt >= 5*bb ? 2 : 1;
+  const c = amt >= 15*bb ? 'c3' : amt >= 5*bb ? 'c2' : 'c1';
+  return `<span class="chips">${`<i class="${c}"></i>`.repeat(n)}</span>`;
+}
+/* The bubble sits on the straight line from the seat to the middle of the table,
+   just clear of the box edge — the same place chips would go in a live game.
+   Angles are worked out in pixels, since the table is far wider than it is tall. */
+const TBL_W = 841, TBL_H = 520;          // nominal felt size; only the ratio matters
+function bubbleOffset(i){
+  const {x,y} = seatPos(i);
+  let dx = (50 - x)/100*TBL_W, dy = (50 - y)/100*TBL_H;
+  const len = Math.hypot(dx, dy) || 1;
+  dx /= len; dy /= len;
+  const HW = 63, HH = 71;                // half the seat box
+  const tx = Math.abs(dx) > 1e-6 ? HW/Math.abs(dx) : Infinity;
+  const ty = Math.abs(dy) > 1e-6 ? HH/Math.abs(dy) : Infinity;
+  const d = Math.min(tx, ty) + 17;       // box edge, plus a gap and half the bubble
+  return {ox: Math.round(dx*d), oy: Math.round(dy*d)};
+}
+function bubbleHTML(f, seat, v, i){
+  const txt = f.acts[seat];
+  if(!txt) return '';
+  const {ox, oy} = bubbleOffset(i);
+  return `<div class="bubble" style="left:calc(50% + ${ox}px);top:calc(50% + ${oy}px)">`
+       + `${chipsHTML(v.committed)}<span>${txt}</span></div>`;
+}
+
+const backs = n => `<div class="cardwrap"><div class="mini">${'<i></i>'.repeat(n)}</div></div>`;
+function cardTile(c, w){
+  const red = c[1]==='h' || c[1]==='d';
+  const gl  = {s:'\u2660',h:'\u2665',d:'\u2666',c:'\u2663'}[c[1]];
+  return `<span class="ct${red?' r':''}" style="--cw:${w}px">${c[0]}<i>${gl}</i></span>`;
+}
+const tiles = (cards, w) => cards.map(c=>cardTile(c,w)).join('');
+
+function syncRepClass(){
+  const el = document.getElementById('repSec');
+  document.body.classList.toggle('rep-open', !!(el && el.open));
+}
+
+function renderReplayer(){
+  syncRepClass();
+  const felt = document.getElementById('felt');
+  if(!S){ felt.innerHTML = ''; return; }
+  const frames = S.frames = buildFrames();
+  const live = S.viewIdx==null;
+  const idx = live ? frames.length-1 : clamp(S.viewIdx, 0, frames.length-1);
+  const f = frames[idx];
+
+  const hi = SEATS.indexOf(S.heroSeat);
+  const order = SEATS.slice(hi).concat(SEATS.slice(0, hi));
+  const toAct = live && S.pending ? S.pending.player.seat : null;
+
+  let html = `<div class="felt"><div class="feltlogo">Ryan&rsquo;s Backyard Casino</div></div>`;
+  order.forEach((seat, i)=>{
+    const p = S.players.find(x=>x.seat===seat), v = f.seats[seat];
+    const {x,y} = seatPos(i);
+    // Box stays light blue for everyone; position and type text carry the colour.
+    const col = v.folded ? 'var(--gone)'
+              : p.isHero ? 'var(--live)'
+              : (TYPE_COLOR[p.type] || 'var(--live)');
+    const edge = v.folded ? 'var(--gone)' : 'var(--live)';
+    const inHand = !v.folded;
+    const cls = ['seat', p.isHero?'hero':(inHand?'live':''), v.folded?'folded':'',
+                 (seat===toAct || (seat===f.actor && !toAct))?'acting':''].filter(Boolean).join(' ');
+    const cards = v.folded ? ''
+      : p.isHero ? `<div class="cardwrap">${tiles(S.hero.cards, 30)}</div>`
+      : ((v.invested>0 || f.street!=='preflop') ? backs(2) : '');
+    html += `<div class="${cls}" style="left:${x}%;top:${y}%;border-color:${edge}">
+      <div class="nm" style="color:${col}">${seatName(seat)}</div>
+      <div class="ty" style="color:${col}">${p.isHero?'Hero':p.type}</div>
+      ${p.flow?`<div class="fl">${p.flow}</div>`:''}
+      <div class="st">${money(v.stack)}</div>
+      ${cards}
+      ${bubbleHTML(f, seat, v, i)}
+    </div>`;
+  });
+
+  const bp = buttonPos(order.indexOf('BTN'));
+  html += `<div class="btnchip" style="left:${bp.x}%;top:${bp.y}%">D</div>`;
+  html += `<div class="center">
+      <div class="board">${f.board.length?tiles(f.board, 34):'<span class="muted">—</span>'}</div>
+      <div class="potl">Pot</div><div class="potv">${money(f.pot)}</div>
+    </div>`;
+  felt.innerHTML = html;
+  document.getElementById('pbPos').textContent = `${idx+1} / ${frames.length}${live?'  · live':''}`;
+  document.getElementById('pbPlay').innerHTML = S.playTimer ? '&#10074;&#10074;' : '&#9654;';
+}
+
+function stepTo(i){
+  if(!S) return;
+  const n = (S.frames || buildFrames()).length;
+  S.viewIdx = clamp(i, 0, n-1);
+  if(S.viewIdx === n-1) S.viewIdx = null;      // last frame is the live state
+  renderReplayer();
+}
+function pbStop(){ if(S && S.playTimer){ clearInterval(S.playTimer); S.playTimer=null; } }
+function pbPlay(){
+  if(!S) return;
+  if(S.playTimer){ pbStop(); renderReplayer(); return; }
+  const ms = +document.getElementById('pbSpeed').value;
+  if(S.viewIdx==null) S.viewIdx = 0;
+  S.playTimer = setInterval(()=>{
+    const n = S.frames.length;
+    if(S.viewIdx==null || S.viewIdx >= n-1){ pbStop(); S.viewIdx=null; renderReplayer(); return; }
+    S.viewIdx++; renderReplayer();
+  }, ms);
+  renderReplayer();
+}
+
+/* ------------------------------ RENDER ---------------------------------- */
+
+
+function streetBlock(name, reveal, lines, cur){
+  const cards = reveal ? `<span class="street-cards">${tiles(reveal.cards, 24)}</span>` : '';
+  const showTags = !(S.filters && S.filters.hideTags);
+  const tags  = reveal ? `<span class="street-tags">${showTags?'['+reveal.tags.join(', ')+'] · ':''}pot ${money(reveal.potAt)} · ${waysLabel(reveal.ways)}</span>` : '';
+  const body  = lines.length
+    ? lines.map(l=>`<div class="${l.cls||''}">${l.txt}</div>`).join('')
+    : '<div class="muted">—</div>';
+  return `<div class="street-blk ${cur?'cur':'past'}">
+    <div class="street-hd"><span class="nm">${name}</span>${cards}${tags}</div>
+    <div class="street-acts">${body}</div>
+  </div>`;
+}
+
+function renderStreets(){
+  const el = document.getElementById('streets');
+  const at = st => S.log.filter(l=>l.street===st && !l.setup && !l.chrome);
+  const live = st => !S.over && S.street===st;
+  const blocks = [ streetBlock('Preflop', null, at('preflop'), live('preflop')) ];
+  if(S.reveal.flop)  blocks.push(streetBlock('Flop',  S.reveal.flop,  at('flop'),  live('flop')));
+  if(S.reveal.turn)  blocks.push(streetBlock('Turn',  S.reveal.turn,  at('turn'),  live('turn')));
+  if(S.reveal.river) blocks.push(streetBlock('River', S.reveal.river, at('river'), live('river')));
+  el.innerHTML = blocks.join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+function render(){
+  if(!S) return;
+  const h = S.hero;
+  document.getElementById('oStakes').textContent = S.stake.id + (S.stake.btnStraddle?' (BTN str)':'')
+    + (S.ladder ? `  ·  ladder ${S.ladder.idx+1}/${S.ladder.rungs.length}` : '');
+  document.getElementById('oSeat').textContent = seatName(S.heroSeat);
+  document.getElementById('oStack').textContent = money(h.stack);
+  const toCall = S.pending ? S.pending.toCall : Math.max(0, S.currentBet - h.committed);
+  document.getElementById('oHand').innerHTML = tiles(h.cards, 30);
+
+  const tb = document.querySelector('#tbl tbody');
+  const inHand = S.players.filter(p=>!p.folded);
+  const out    = S.players.filter(p=>p.folded);
+  let rows = inHand.map(p=>{
+    const cls = p.isHero ? 'hero' : '';
+    const status = p.allIn ? 'all in' : (S.over?'—':'in');
+    // Effective stack is what can still change hands between us and them.
+    const eff = p.isHero ? '·' : money(Math.min(p.stack, h.stack));
+    const tc = p.isHero ? 'var(--live)' : (TYPE_COLOR[p.type]||'inherit');
+    return `<tr class="${cls}"><td>${seatName(p.seat)}</td><td style="color:${tc}">${p.isHero?'Hero':p.type}</td>
+      <td style="color:${p.flow?'var(--gold)':'inherit'}">${p.flow||'·'}</td>
+      <td>${money(p.stack)}</td><td>${eff}</td><td>${p.invested?money(p.invested):'·'}</td><td>${status}</td></tr>`;
+  }).join('');
+  if(out.length){
+    const names = out.map(p=>seatName(p.seat)).join(' · ');
+    rows += `<tr class="out"><td colspan="7" style="padding-top:8px">folded (${out.length}): ${names}</td></tr>`;
+  }
+  tb.innerHTML = rows;
+
+  renderStreets();
+  renderReplayer();
+  renderAction(toCall);
+  buildSummary();
+  document.getElementById('shorthand').value = buildShorthand();
+}
+
+function renderAction(toCall){
+  let box = document.getElementById('act');
+  const lbl = document.getElementById('actLbl');
+  if(lbl) lbl.textContent = (S && S.over) ? 'Replay & ladder' : 'Our action';
+  const tools = document.getElementById('repTools');
+  const tbody = document.getElementById('toolsBody');
+  if(!S.over){ tools.style.display='none'; tbody.innerHTML=''; }
+  if(S.over){
+    box.innerHTML = `<div class="done">Hand complete — talk it through, then deal the next rep.</div>`;
+    if(!S.flopSnap){ tools.style.display='none'; tbody.innerHTML=''; return; }
+    tools.style.display='';
+    box = tbody;
+    const flop = S.board.slice(0,3);
+    const rest = newDeck().filter(c=>!flop.includes(c));
+    const opts = sel => `<option value="">random</option>` +
+      rest.map(c=>`<option value="${c}"${c===sel?' selected':''}>${c}</option>`).join('');
+    const L = S.ladder;
+    const ladderUI = L && L.idx+1 < L.rungs.length
+      ? `<div class="opts"><button class="bt-pink" id="bRung">Next rung (${L.idx+2} of ${L.rungs.length})</button>
+           <button id="bStopLadder">End ladder</button></div>
+         <div class="hint">Ladder over the ${L.kind==='both'?'turn and river':L.kind}. Same flop, same hand, same opponents.</div>`
+      : `<div class="opts"><button class="bt-pink" id="bLadder">Build runout ladder</button></div>
+         <div id="ladderWrap" style="display:none;margin-bottom:10px">
+           <div class="sizer" style="margin-bottom:8px">
+             <span style="font-size:11px;color:var(--bone-dim);min-width:52px">Vary</span>
+             <select id="ldKind">
+               <option value="river">River only (turn fixed)</option>
+               <option value="turn">Turn only</option>
+               <option value="both">Turn and river</option>
+             </select>
+             <span style="font-size:11px;color:var(--bone-dim);min-width:42px">Rungs</span>
+             <select id="ldN"><option>4</option><option selected>6</option><option>8</option></select>
+           </div>
+           <button class="primary" id="bBuildLadder">Start ladder</button>
+           <div class="hint">One rung per texture category — brick, overcard, board-pairer, flush-completer, straight-completer.</div>
+         </div>`;
+    box.innerHTML = ladderUI + `
+      <div class="opts"><button class="bt-pink" id="bEdit">Change hand &amp; runout</button></div>
+      <div id="editWrap" style="display:none">
+        <div class="sizer" style="margin-bottom:8px">
+          <input type="text" id="edHole" placeholder="our hand — e.g. AhKd (blank = keep ${S.hero.cards.join('')})" autocomplete="off">
+        </div>
+        <div class="sizer" style="margin-bottom:8px">
+          <span style="font-size:11px;color:var(--bone-dim);min-width:42px">Turn</span>
+          <select id="edTurn">${opts(S.board[3])}</select>
+          <span style="font-size:11px;color:var(--bone-dim);min-width:42px">River</span>
+          <select id="edRiver">${opts(S.board[4])}</select>
+        </div>
+        <button class="primary" id="bReplay">Replay from flop</button>
+        <div class="hint">Flop stays ${flop.join(' ')}. Stacks, opponents and the preflop action are restored exactly.</div>
+        <div class="err" id="edErr"></div>
+      </div>
+      <div class="hint">Rerun this exact flop with a runout you want to drill.</div>`;
+    if(L && L.idx+1 < L.rungs.length){
+      document.getElementById('bRung').onclick = nextRung;
+      document.getElementById('bStopLadder').onclick = ()=>{ S.ladder=null; render(); };
+    } else {
+      document.getElementById('bLadder').onclick = ()=>{
+        const w = document.getElementById('ladderWrap');
+        w.style.display = w.style.display==='none' ? 'block' : 'none';
+      };
+      document.getElementById('bBuildLadder').onclick = ()=>{
+        buildLadder(document.getElementById('ldKind').value, +document.getElementById('ldN').value);
+      };
+    }
+    document.getElementById('bEdit').onclick = ()=>{
+      const w = document.getElementById('editWrap');
+      w.style.display = w.style.display==='none' ? 'block' : 'none';
+    };
+    document.getElementById('bReplay').onclick = ()=>{
+      const raw = document.getElementById('edHole').value.trim();
+      const err = document.getElementById('edErr');
+      let hole = null;
+      if(raw){
+        hole = parseHole(raw);
+        if(!hole){ err.textContent = 'Use two distinct cards not on the flop, e.g. AhKd.'; return; }
+      }
+      const t = document.getElementById('edTurn').value;
+      const r = document.getElementById('edRiver').value;
+      const clash = c => c && ((hole||S.hero.cards).includes(c));
+      if(t && r && t===r){ err.textContent = 'Turn and river must differ.'; return; }
+      if(clash(t) || clash(r)){ err.textContent = 'That card is already in our hand.'; return; }
+      replayFromFlop(hole, t, r);
+    };
+    return;
+  }
+  if(!S.pending){ box.innerHTML = `<div class="done">Waiting on villains…</div>`; return; }
+  const p = S.pending.player;
+  const maxTo = p.committed + p.stack;
+  const facing = toCall>0;
+  const minTo = S.currentBet===0 ? S.bbAmt : S.currentBet + Math.max(S.lastRaise, S.bbAmt);
+  const word = facing ? 'Raise' : 'Bet';
+  box.innerHTML = `
+    <div class="opts">
+      ${facing ? `<button class="bt-fold" id="bFold">Fold</button>` : ''}
+      <button class="${facing?'bt-call':'bt-check'}" id="bCall">${facing ? 'Call '+money(toCall) : 'Check'}</button>
+      <button class="${facing?'bt-raise':'bt-bet'}" id="bOpen">${word}</button>
+      <span class="sizer" id="sizerWrap">
+        <input type="text" id="sizeIn" placeholder="${word} to…  150 · 60% · 3x · pot · jam" autocomplete="off">
+        <button class="primary" id="bRaise">Confirm</button>
+      </span>
+    </div>
+    <div class="hint">${S.street} · min ${money(Math.min(minTo,maxTo))} · max ${money(maxTo)} · our stack ${money(p.stack)}
+      <br><span class="keys" style="color:var(--gold-dim)">keys: ${facing?'f fold · ':''}c ${facing?'call':'check'} · ${facing?'r':'b'} to size · esc to cancel</span></div>
+    <div class="err" id="heroErr"></div>`;
+  const f = document.getElementById('bFold');
+  if(f) f.onclick = ()=>heroAct('fold');
+  document.getElementById('bCall').onclick = ()=>heroAct('call');
+  document.getElementById('bOpen').onclick = openSizer;
+  const si = document.getElementById('sizeIn');
+  document.getElementById('bRaise').onclick = ()=>heroAct('raise', si.value);
+  si.onkeydown = e=>{
+    if(e.key==='Enter'){ e.preventDefault(); e.stopPropagation(); heroAct('raise', si.value); }
+    if(e.key==='Escape'){ e.preventDefault(); e.stopPropagation(); closeSizer(); }
+  };
+}
+
+/* The free-text size box only appears once Bet or Raise is chosen. */
+function openSizer(){
+  const w = document.getElementById('sizerWrap');
+  if(!w) return;
+  w.style.display = 'flex';
+  const si = document.getElementById('sizeIn');
+  if(si) si.focus();
+}
+function closeSizer(){
+  const w = document.getElementById('sizerWrap');
+  if(!w) return;
+  const si = document.getElementById('sizeIn');
+  if(si) si.value = '';
+  w.style.display = 'none';
+}
+
+/* Neon families: fish orange, trying recs green, regs red, whales pink.
+   Looser/aggro run brighter, tighter run deeper. */
+const TYPE_COLOR = {
+  'Looser Fish':'#ffb45c','Standard Fish':'#ff8c1a','Tighter Fish':'#cf6a00',
+  'Aggro Trying Rec':'#86ff9f','Trying Rec':'#39ff6a','Tighter Trying Rec':'#17c247',
+  'Aggro Reg':'#ff8080','Reg':'#ff3b3b','Tighter Reg':'#c02020',
+  'Whale':'#ff4fd8',
+};
+
+const TYPE_ABBR = {'Standard Fish':'fish','Looser Fish':'loose fish','Tighter Fish':'tight fish',
+  'Trying Rec':'trec','Aggro Trying Rec':'aggro trec','Tighter Trying Rec':'tight trec',
+  'Reg':'reg','Tighter Reg':'tight reg','Aggro Reg':'aggro reg','Whale':'whale'};
+
+function posShort(p){ return S.straddles[p.seat] ? 'Str' : SEAT_LABEL[p.seat]; }
+function shortSeat(p){ return p.isHero ? 'H' : posShort(p); }
+function shortHand(cards){
+  let [a,b] = cards;
+  if(RVAL[b[0]] > RVAL[a[0]]) [a,b] = [b,a];
+  if(a[0]===b[0]) return a[0]+b[0];
+  if(a[1]===b[1]) return a[0]+b[0]+a[1]+a[1];
+  return a[0]+b[0]+'o';
+}
+const shortAmt = n => String(Math.round(n));
+
+/* The compact format the coaches read hands in. */
+function buildShorthand(){
+  if(!S) return '';
+  const h = S.hero, L = [];
+  const inHand = S.players.filter(p=>!p.isHero && p.invested>0);
+  L.push(`H ${posShort(h)} ${shortHand(h.cards)}, ` +
+    inHand.map(p=>`${shortSeat(p)} ${TYPE_ABBR[p.type]||p.type}${p.flow?' ('+p.flow+')':''} ${shortAmt(p.stack+p.invested)}`).join(', '));
+
+  const render = (a, first) => {
+    const who = shortSeat(a.p);
+    if(a.kind==='check')  return 'X';
+    if(a.kind==='fold')   return `${who} fold`;
+    if(a.kind==='call')   return `${who} call`;
+    if(a.kind==='limp')   return `${who} ${first?'OL':'limp'}`;
+    if(a.kind==='bet')    return `${who} ${shortAmt(a.to)}`;
+    if(a.street==='preflop'){
+      const tag = a.pf<=1 ? (a.limpers?'iso':'rfi') : a.pf===2 ? '3b' : a.pf===3 ? '4b' : '5b';
+      return `${who} ${tag} ${shortAmt(a.to)}`;
+    }
+    return `${who} ${a.xr?'XR ':''}${shortAmt(a.to)}`;
+  };
+  const collapse = parts => {
+    const out=[]; let run=0;
+    parts.forEach(x=>{ if(x==='X'){run++;} else { if(run){out.push('X'.repeat(run)); run=0;} out.push(x);} });
+    if(run) out.push('X'.repeat(run));
+    return out.join(', ');
+  };
+  const street = st => {
+    const acts = S.acts.filter(a=>a.street===st && a.kind!=='post' && !a.open);
+    let seenLimp = false;
+    return collapse(acts.map(a=>{ const first = a.kind==='limp' && !seenLimp;
+      if(a.kind==='limp') seenLimp = true; return render(a, first); }));
+  };
+
+  const strNote = Object.keys(S.straddles).length ? 'Str on, ' : '';
+  const ways = S.flopWays ? `, ${S.flopWays===2?'HU':S.flopWays+'ways'}` : '';
+  L.push(strNote + street('preflop') + ways);
+  ['flop','turn','river'].forEach(st=>{
+    const r = S.reveal[st]; if(!r) return;
+    const line = street(st);
+    L.push(`(${shortAmt(r.potAt)}) ${r.cards.join('')}${line?': '+line:''}`);
+  });
+  if(!S.over) L.push('Hero?');
+  return L.join('\n');
+}
+
+function buildSummary(){
+  if(!S) return;
+  const h=S.hero;
+  const lines = [];
+  if(S.flagged) lines.push('*** FLAGGED FOR REVIEW ***');
+  lines.push(`STAKES   ${S.stake.id}${S.stake.btnStraddle?' (BTN straddle)':''} · 8-handed`);
+  lines.push(`SEAT     ${seatName(S.heroSeat)} · our stack at deal ${money(h.stack + h.invested)}`);
+  lines.push(`POT TYPE ${S.potTypeActual}${S.flopWays?` · ${waysLabel(S.flopWays)} to the flop`:' · ended preflop'}`);
+  lines.push(`HAND     ${h.cards.join(' ')}   (dealt from ${S.heroRangeKey})`);
+  if(S.board.length) lines.push(`BOARD    ${S.board.join(' ')}`);
+  lines.push(`TABLE    ${S.players.filter(p=>!p.isHero).map(p=>`${seatName(p.seat)} ${p.type}${p.flow?' ['+p.flow+']':''} ${money(p.stack+p.invested)}`).join(' | ')}`);
+  const at = st => S.log.filter(l=>l.street===st && !l.setup && !l.chrome);
+  const blk = (nm, rev, ls) => {
+    lines.push('');
+    lines.push(nm.toUpperCase() + (rev ? `  ${rev.cards.join(' ')}   [${rev.tags.join(', ')}]  ·  pot ${money(rev.potAt)}  ·  ${waysLabel(rev.ways)}` : ''));
+    ls.forEach(l=>lines.push('  '+l.txt.replace(/<[^>]+>/g,'')));
+  };
+  blk('Preflop', null, at('preflop'));
+  if(S.reveal.flop)  blk('Flop',  S.reveal.flop,  at('flop'));
+  if(S.reveal.turn)  blk('Turn',  S.reveal.turn,  at('turn'));
+  if(S.reveal.river) blk('River', S.reveal.river, at('river'));
+  lines.push('');
+  lines.push(`FINAL POT ${money(S.pot)}`);
+  document.getElementById('summary').value = lines.join('\n');
+}
+
+/* ------------------------------ WIRING ---------------------------------- */
+
+/* ---- filter presets ------------------------------------------------- */
+const FILTER_IDS = ['fTimer','fStakes','fPot','fSeat','fWays','fFixedFlop','fHideTags',
+                    'fFlop','fTurn','fRiver','fDrillAt','fLineFlop','fLineTurn','fModel','fReplayer','fPacing'];
+let PRESETS = {};
+function loadPresets(){
+  try{ PRESETS = JSON.parse(localStorage.getItem('rtp-presets') || '{}'); }
+  catch(e){ PRESETS = {}; }                 // sandboxed viewer: session-only
+}
+function savePresets(){
+  try{ localStorage.setItem('rtp-presets', JSON.stringify(PRESETS)); }catch(e){}
+}
+function snapshotFilters(){
+  const o = {};
+  FILTER_IDS.forEach(id=>{
+    const el = document.getElementById(id);
+    o[id] = el.type==='checkbox' ? el.checked : el.value;
+  });
+  return o;
+}
+function applyFilters(o){
+  FILTER_IDS.forEach(id=>{
+    if(!(id in o)) return;
+    const el = document.getElementById(id);
+    if(el.type==='checkbox') el.checked = !!o[id]; else el.value = o[id];
+  });
+  document.getElementById('fDrillAt').dispatchEvent(new Event('change'));
+}
+function refreshPresetList(sel){
+  const el = document.getElementById('presetSel');
+  el.innerHTML = '<option value="">— none —</option>' +
+    Object.keys(PRESETS).sort().map(n=>`<option value="${n}"${n===sel?' selected':''}>${n}</option>`).join('');
+}
+
+(function init(){
+  const fs = document.getElementById('fStakes');
+  STAKES.forEach(s=>{ const o=document.createElement('option'); o.value=s.id; o.textContent=s.id; fs.appendChild(o); });
+  const fseat = document.getElementById('fSeat');
+  SEATS.forEach(s=>{ const o=document.createElement('option'); o.value=s; o.textContent=SEAT_LABEL[s]; fseat.appendChild(o); });
+
+  loadPresets(); refreshPresetList();
+  document.getElementById('presetSel').onchange = e=>{
+    const n = e.target.value; if(n && PRESETS[n]) applyFilters(PRESETS[n]);
+    document.getElementById('presetName').value = n;
+  };
+  document.getElementById('presetSave').onclick = ()=>{
+    const n = document.getElementById('presetName').value.trim();
+    if(!n) return;
+    PRESETS[n] = snapshotFilters(); savePresets(); refreshPresetList(n);
+  };
+  document.getElementById('presetDel').onclick = ()=>{
+    const n = document.getElementById('presetSel').value;
+    if(!n) return;
+    delete PRESETS[n]; savePresets(); refreshPresetList();
+    document.getElementById('presetName').value = '';
+  };
+
+  const drillSel = document.getElementById('fDrillAt');
+  const syncLine = ()=>{
+    const d = drillSel.value;
+    document.getElementById('fLineFlop').disabled = (d==='preflop' || d==='flop');
+    document.getElementById('fLineTurn').disabled = (d!=='river');
+  };
+  drillSel.onchange = syncLine; syncLine();
+  document.getElementById('pbFirst').onclick = ()=>{ pbStop(); stepTo(0); };
+  document.getElementById('pbPrev').onclick  = ()=>{ pbStop(); stepTo((S && S.viewIdx!=null ? S.viewIdx : (S?S.frames.length-1:0)) - 1); };
+  document.getElementById('pbNext').onclick  = ()=>{ pbStop(); stepTo((S && S.viewIdx!=null ? S.viewIdx : (S?S.frames.length-1:0)) + 1); };
+  document.getElementById('pbLive').onclick  = ()=>{ pbStop(); if(S){ S.viewIdx=null; renderReplayer(); } };
+  document.getElementById('pbPlay').onclick  = pbPlay;
+  document.getElementById('repSec').addEventListener('toggle', ()=>{ syncRepClass(); if(S) render(); });
+  document.getElementById('deal').onclick = dealHand;
+  document.getElementById('dealTop').onclick = dealHand;
+  document.getElementById('clockRestart').onclick = ()=>{ if(S && S.pending) startTimer(); };
+  document.getElementById('copySum').onclick = ()=>navigator.clipboard.writeText(document.getElementById('summary').value);
+  document.getElementById('flagBtn').onclick = toggleFlag;
+  document.getElementById('copyShort').onclick = ()=>navigator.clipboard.writeText(document.getElementById('shorthand').value);
+  document.getElementById('copySession').onclick = ()=>{
+    const sorted = [...sessionLog].sort((a,b)=>(b.flagged?1:0)-(a.flagged?1:0));
+    navigator.clipboard.writeText(sorted.map(e=>e.text).join('\n\n'+'='.repeat(60)+'\n\n'));
+  };
+  document.addEventListener('keydown', e=>{
+    if(e.key==='d' && (e.metaKey||e.ctrlKey)){ e.preventDefault(); dealHand(); return; }
+    if(!S) return;
+    if(e.key==='ArrowLeft' || e.key==='ArrowRight'){
+      const a = document.getElementById('sizeIn');
+      if(a && a.value.trim()) return;                              // typing a size
+      e.preventDefault(); pbStop();
+      const cur = S.viewIdx!=null ? S.viewIdx : ((S.frames||buildFrames()).length - 1);
+      stepTo(cur + (e.key==='ArrowRight' ? 1 : -1));
+      return;
+    }
+    const k = e.key.toLowerCase();
+    if(S.over){
+      if(Date.now() - lastFinish < 600) return;      // don't let the closing keystroke deal
+      if(e.key==='Enter' || k==='d'){ e.preventDefault(); dealHand(); }
+      return;
+    }
+    if(!S.pending) return;
+    const si = document.getElementById('sizeIn');
+    const empty = !(si && si.value.trim());
+    if(!empty) return;                       // mid-size-entry: let the input have the keys
+    if(k==='f'){ e.preventDefault(); if(S.pending.toCall>0) heroAct('fold'); return; }
+    if(k==='c'){ e.preventDefault(); heroAct('call'); return; }
+    if(k==='r'||k==='b'){ e.preventDefault(); openSizer(); return; }
+  });
+})();
+</script>
+</body>
+</html>

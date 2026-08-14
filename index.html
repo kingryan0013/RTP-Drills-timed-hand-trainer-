@@ -101,7 +101,18 @@
   .seat.folded{background:#11161a;box-shadow:none;border-color:var(--gone)}
   .seat .bet{display:inline-block;margin-top:3px;padding:1px 7px;border-radius:9px;
     background:var(--gold);color:#08131b;font-weight:700;font-size:11px;font-variant-numeric:tabular-nums}
-  .seat .did{color:var(--bone);font-size:11px;min-height:14px}
+  .bubble{position:absolute;white-space:nowrap;font-size:11px;font-weight:600;
+    background:rgba(9,14,18,.9);border:1px solid rgba(143,211,255,.28);border-radius:13px;
+    padding:3px 9px;display:flex;align-items:center;gap:5px;box-shadow:0 2px 6px rgba(0,0,0,.55)}
+  .bubble{transform:translate(-50%,-50%)}
+  .seat.folded .bubble{color:var(--gone);border-color:rgba(91,102,114,.4);background:rgba(9,12,15,.85)}
+  .chips{display:inline-flex}
+  .chips i{width:13px;height:13px;border-radius:50%;display:block;margin-left:-5px;
+    border:2px dotted rgba(255,255,255,.6);box-shadow:0 1px 2px rgba(0,0,0,.6)}
+  .chips i:first-child{margin-left:0}
+  .chips i.c1{background:#c9483f}
+  .chips i.c2{background:#2f9e57}
+  .chips i.c3{background:#23292f;border-color:rgba(255,255,255,.75)}
   .mini{display:flex;gap:3px;justify-content:center;margin-top:3px}
   .mini{gap:3px}
   .mini i{width:19px;height:27px;border-radius:3px;display:block;
@@ -357,6 +368,10 @@
           <option>20</option><option>25</option><option>30</option><option>45</option>
           <option>60</option><option>90</option><option>120</option>
         </select></div>
+      <div class="fset">
+        <div class="chk"><input type="checkbox" id="fPacing" checked><label for="fPacing"
+          style="margin:0;text-transform:none;letter-spacing:0;font-size:12px">Realistic action timing (delays)</label></div>
+      </div>
       <div class="fset">
         <div class="chk"><input type="checkbox" id="fReplayer" checked><label for="fReplayer"
           style="margin:0;text-transform:none;letter-spacing:0;font-size:12px">Open hand replayer on deal</label></div>
@@ -791,7 +806,7 @@ function dealHand(){
     f.turn = ''; f.river = '';
     tryBuildHand(f);
   }
-  pbStop();
+  pbStop(); clearPace();
   document.getElementById('repSec').open = document.getElementById('fReplayer').checked;
   syncRepClass();
   try{ window.scrollTo({top:0, behavior:'smooth'}); }catch(e){}
@@ -816,6 +831,7 @@ function readFilters(){
     lineTurn: document.getElementById('fLineTurn').value,
     fixedFlop: document.getElementById('fFixedFlop').value,
     hideTags: document.getElementById('fHideTags').checked,
+    pacing: document.getElementById('fPacing').checked,
   };
 }
 
@@ -850,7 +866,7 @@ function tryBuildHand(f){
 
   S = {
     stake: st, bbAmt, players, hero, heroSeat,
-    targetPot, targetWays, model: f.model, timerLen: f.timer, line,
+    targetPot, targetWays, model: f.model, timerLen: f.timer, line, pacing: f.pacing,
     filters: f, flopPool: cands,
     street:'preflop', board:[], deck:newDeck(), reveal:{},
     pot:0, currentBet:0, lastRaise:0, aggressor:null,
@@ -994,22 +1010,50 @@ function nextActor(){
   return null;
 }
 
-function advance(){
-  if(S.over) return;
-  while(true){
-    if(bettingClosed()){ endStreet(); if(S.over) { render(); return; } continue; }
-    const p = nextActor();
-    if(!p){ endStreet(); if(S.over){render();return;} continue; }
-    if(p.isHero){
-      const sc = heroScripted();
-      if(sc){ applyScript(p, sc); S.idx=(S.idx+1)%S.order.length; continue; }
-      promptHero(p); render(); return;
-    }
-    const vs = S.street==='preflop' ? null : villainScripted(p);
-    if(vs) applyScript(p, vs); else villainAct(p);
-    S.idx = (S.idx+1)%S.order.length;
-    if(livePlayers().length===1){ endStreet(); render(); return; }
+let paceTimer = null;
+function clearPace(){ if(paceTimer){ clearTimeout(paceTimer); paceTimer = null; } }
+const PACE = {hero:3000, villain:1000, board:1000};
+function paceMs(kind){ return (S && S.pacing) ? PACE[kind] : 0; }
+
+/* One unit of engine work, then schedule the next with a lifelike pause. */
+function advance(delay){
+  clearPace();
+  if(!S || S.over) return;
+  if(delay > 0){ paceTimer = setTimeout(()=>{ paceTimer = null; stepOnce(); }, delay); return; }
+  stepOnce();
+}
+
+function stepOnce(){
+  if(!S || S.over){ render(); return; }
+  const actor = nextActor();
+  if(bettingClosed() || !actor){
+    endStreet();                                  // deals the next board card(s)
+    if(S.over){ render(); return; }
+    render();
+    advance(paceMs('board'));
+    return;
   }
+  if(actor.isHero){
+    const sc = heroScripted();
+    if(sc){
+      applyScript(actor, sc);
+      S.idx = (S.idx+1)%S.order.length;
+      render();
+      advance(bettingClosed() ? paceMs('board') : paceMs('hero'));
+      return;
+    }
+    promptHero(actor); render(); return;
+  }
+  const before = S.acts.length;
+  const vs = S.street==='preflop' ? null : villainScripted(actor);
+  if(vs) applyScript(actor, vs); else villainAct(actor);
+  S.idx = (S.idx+1)%S.order.length;
+  // An open fold is invisible on the felt, so pausing for it is dead time.
+  const last = S.acts[S.acts.length-1];
+  const silent = S.acts.length > before && last && last.kind==='fold' && last.open;
+  render();
+  if(livePlayers().length===1){ endStreet(); render(); return; }
+  advance(silent ? 0 : (bettingClosed() ? paceMs('board') : paceMs('villain')));
 }
 
 function collect(){
@@ -1215,7 +1259,7 @@ function parseHole(str){
 
 let lastFinish = 0;
 function finish(){
-  S.over = true; S.pending=null; stopTimer();
+  S.over = true; S.pending=null; stopTimer(); clearPace();
   lastFinish = Date.now();
   document.body.classList.remove('playing');
   buildSummary();
@@ -1516,8 +1560,8 @@ function heroAct(kind, sizeStr){
   }
   S.pending=null; stopTimer();
   S.idx = (S.idx+1)%S.order.length;
-  advance();
   render();
+  advance(bettingClosed() ? paceMs('board') : paceMs('hero'));
 }
 
 function parseSize(raw, toCall, p){
@@ -1540,9 +1584,15 @@ function parseSize(raw, toCall, p){
 
 /* ------------------------------ TIMER ----------------------------------- */
 
+/* Preflop is capped at 10s no matter what the filter says — that's closer to
+   the time you actually get before the action is on you. */
+function timerFor(){
+  return S.street==='preflop' ? Math.min(S.timerLen, 10) : S.timerLen;
+}
 function startTimer(){
   stopTimer();
-  timer.total = S.timerLen; timer.left = S.timerLen;
+  const len = timerFor();
+  timer.total = len; timer.left = len;
   timer.expired=false; timer.active=true;
   paintClock();
   timer.id = setInterval(()=>{
@@ -1579,12 +1629,13 @@ function buildFrames(){
   const seats = {};
   S.players.forEach(p=>seats[p.seat] = {stack:S.initialStacks[p.seat], committed:0, invested:0, folded:false});
   let pot = 0, board = [], street = 'preflop';
+  let lastAct = {};                      // seat -> most recent action this street
   const frames = [];
   let dirty = false;                    // state changed with no frame taken since
   const snap = (label, actor) => {
     dirty = false;
     frames.push({
-      street, board:[...board], pot, label, actor,
+      street, board:[...board], pot, label, actor, acts:{...lastAct},
       seats: Object.fromEntries(Object.entries(seats).map(([k,v])=>[k,{...v}]))
     });
   };
@@ -1598,6 +1649,7 @@ function buildFrames(){
     if(st !== 'preflop'){
       const rev = S.reveal[st]; if(!rev) break;
       Object.values(seats).forEach(v=>v.committed = 0);
+      lastAct = {};                      // fresh street, fresh action labels
       street = st; board = [...board, ...rev.cards];
       snap(st.toUpperCase(), null);
     }
@@ -1612,6 +1664,7 @@ function buildFrames(){
       else if(a.kind==='call'){ put(a.p.seat, a.amt); label = 'calls ' + money(a.amt); }
       else { put(a.p.seat, a.to - v.committed);
              label = (a.kind==='bet' ? 'bets ' : 'raises to ') + money(a.to); }
+      lastAct[a.p.seat] = label;
       snap(label, a.p.seat);
     }
   }
@@ -1644,6 +1697,37 @@ function buttonPos(i){
   if(x > 60)  return {x: x - HW - 2.5, y};
   return {x, y: y < 50 ? y + HH + 3 : y - HH - 3};
 }
+/* Chips scale with what's in front of a player, coloured like casino denominations. */
+function chipsHTML(amt){
+  if(!amt) return '';
+  const bb = S.bbAmt;
+  const n = amt >= 15*bb ? 3 : amt >= 5*bb ? 2 : 1;
+  const c = amt >= 15*bb ? 'c3' : amt >= 5*bb ? 'c2' : 'c1';
+  return `<span class="chips">${`<i class="${c}"></i>`.repeat(n)}</span>`;
+}
+/* The bubble sits on the straight line from the seat to the middle of the table,
+   just clear of the box edge — the same place chips would go in a live game.
+   Angles are worked out in pixels, since the table is far wider than it is tall. */
+const TBL_W = 841, TBL_H = 520;          // nominal felt size; only the ratio matters
+function bubbleOffset(i){
+  const {x,y} = seatPos(i);
+  let dx = (50 - x)/100*TBL_W, dy = (50 - y)/100*TBL_H;
+  const len = Math.hypot(dx, dy) || 1;
+  dx /= len; dy /= len;
+  const HW = 63, HH = 71;                // half the seat box
+  const tx = Math.abs(dx) > 1e-6 ? HW/Math.abs(dx) : Infinity;
+  const ty = Math.abs(dy) > 1e-6 ? HH/Math.abs(dy) : Infinity;
+  const d = Math.min(tx, ty) + 17;       // box edge, plus a gap and half the bubble
+  return {ox: Math.round(dx*d), oy: Math.round(dy*d)};
+}
+function bubbleHTML(f, seat, v, i){
+  const txt = f.acts[seat];
+  if(!txt) return '';
+  const {ox, oy} = bubbleOffset(i);
+  return `<div class="bubble" style="left:calc(50% + ${ox}px);top:calc(50% + ${oy}px)">`
+       + `${chipsHTML(v.committed)}<span>${txt}</span></div>`;
+}
+
 const backs = n => `<div class="cardwrap"><div class="mini">${'<i></i>'.repeat(n)}</div></div>`;
 function cardTile(c, w){
   const red = c[1]==='h' || c[1]==='d';
@@ -1691,8 +1775,7 @@ function renderReplayer(){
       ${p.flow?`<div class="fl">${p.flow}</div>`:''}
       <div class="st">${money(v.stack)}</div>
       ${cards}
-      <div class="did">${seat===f.actor ? f.label : ''}</div>
-      ${v.committed>0?`<div class="bet">${money(v.committed)}</div>`:''}
+      ${bubbleHTML(f, seat, v, i)}
     </div>`;
   });
 
@@ -2025,7 +2108,7 @@ function buildSummary(){
 
 /* ---- filter presets ------------------------------------------------- */
 const FILTER_IDS = ['fTimer','fStakes','fPot','fSeat','fWays','fFixedFlop','fHideTags',
-                    'fFlop','fTurn','fRiver','fDrillAt','fLineFlop','fLineTurn','fModel','fReplayer'];
+                    'fFlop','fTurn','fRiver','fDrillAt','fLineFlop','fLineTurn','fModel','fReplayer','fPacing'];
 let PRESETS = {};
 function loadPresets(){
   try{ PRESETS = JSON.parse(localStorage.getItem('rtp-presets') || '{}'); }
